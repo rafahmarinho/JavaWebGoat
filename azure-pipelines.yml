@@ -79,6 +79,17 @@ steps:
     echo ""
     
     echo "=== [9/9] Executando DSM CLI ==="
+    # Configurar variáveis de ambiente do senhasegura
+    export SENHASEGURA_URL="${DSM_URL}"
+    export SENHASEGURA_CLIENT_ID="${DSM_CLIENT_ID}"
+    export SENHASEGURA_CLIENT_SECRET="${DSM_CLIENT_SECRET}"
+    
+    echo "Variáveis de ambiente do senhasegura configuradas:"
+    echo "SENHASEGURA_URL: ${SENHASEGURA_URL}"
+    echo "SENHASEGURA_CLIENT_ID: ${SENHASEGURA_CLIENT_ID}"
+    echo "SENHASEGURA_CLIENT_SECRET: ***************"
+    echo ""
+    
     echo "Comando a ser executado:"
     echo "dsm runb --application \${APPLICATION} --system \${SYSTEM} --environment \${ENVIRONMENT} --config .config.yml --tool azure-devops -v"
     echo "Iniciando execução..."
