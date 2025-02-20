@@ -6,19 +6,19 @@ pool:
 
 steps:
 - script: |
-    echo "=== [1/8] Verificando ambiente de trabalho ==="
+    echo "=== [1/9] Verificando ambiente de trabalho ==="
     echo "Diretório atual: $(pwd)"
     echo "Conteúdo do diretório:"
     ls -la
     echo ""
     
-    echo "=== [2/8] Criando diretório para DSM CLI ==="
+    echo "=== [2/9] Criando diretório para DSM CLI ==="
     mkdir -p $(Build.SourcesDirectory)/dsmcli
     cd $(Build.SourcesDirectory)/dsmcli
     echo "Novo diretório de trabalho: $(pwd)"
     echo ""
     
-    echo "=== [3/8] Clonando repositório DSM CLI ==="
+    echo "=== [3/9] Clonando repositório DSM CLI ==="
     git clone https://github.com/senhasegura/dsmcli.git .
     if [ $? -ne 0 ]; then
         echo "ERRO: Falha ao clonar repositório"
@@ -28,22 +28,31 @@ steps:
     ls -la
     echo ""
     
-    echo "=== [4/8] Verificando arquivo DSM ==="
-    if [ ! -f "dsm" ]; then
-        echo "ERRO: Arquivo dsm não encontrado"
+    echo "=== [4/9] Verificando executável Linux AMD64 ==="
+    if [ ! -f "bin/dsm-linux-amd64" ]; then
+        echo "ERRO: Executável Linux AMD64 não encontrado"
         exit 1
     fi
-    echo "Permissões atuais do dsm:"
-    ls -la dsm
+    echo "Permissões do executável:"
+    ls -la bin/dsm-linux-amd64
     echo ""
     
-    echo "=== [5/8] Configurando permissões ==="
+    echo "=== [5/9] Copiando e renomeando executável ==="
+    cp bin/dsm-linux-amd64 dsm
+    if [ ! -f "dsm" ]; then
+        echo "ERRO: Falha ao copiar executável"
+        exit 1
+    fi
+    echo "Executável copiado com sucesso"
+    echo ""
+    
+    echo "=== [6/9] Configurando permissões ==="
     chmod +x dsm
     echo "Novas permissões do dsm:"
     ls -la dsm
     echo ""
     
-    echo "=== [6/8] Criando arquivo de configuração ==="
+    echo "=== [7/9] Criando arquivo de configuração ==="
     echo "Criando .config.yml..."
     cat > .config.yml << EOF
     auth:
@@ -60,7 +69,7 @@ steps:
     ls -la .config.yml
     echo ""
     
-    echo "=== [7/8] Verificando variáveis de ambiente ==="
+    echo "=== [8/9] Verificando variáveis de ambiente ==="
     echo "APPLICATION: ${APPLICATION:-não definido}"
     echo "SYSTEM: ${SYSTEM:-não definido}"
     echo "ENVIRONMENT: ${ENVIRONMENT:-não definido}"
@@ -69,7 +78,7 @@ steps:
     echo "DSM_CLIENT_SECRET: ***************"
     echo ""
     
-    echo "=== [8/8] Executando DSM CLI ==="
+    echo "=== [9/9] Executando DSM CLI ==="
     echo "Comando a ser executado:"
     echo "dsm runb --app-name \${APPLICATION} --system \${SYSTEM} --environment \${ENVIRONMENT} --config .config.yml --tool azure-devops -v"
     echo "Iniciando execução..."
