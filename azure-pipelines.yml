@@ -80,10 +80,10 @@ steps:
     
     echo "=== [9/9] Executando DSM CLI ==="
     echo "Comando a ser executado:"
-    echo "dsm runb --app-name \${APPLICATION} --system \${SYSTEM} --environment \${ENVIRONMENT} --config .config.yml --tool azure-devops -v"
+    echo "dsm runb --application \${APPLICATION} --system \${SYSTEM} --environment \${ENVIRONMENT} --config .config.yml --tool azure-devops -v"
     echo "Iniciando execução..."
     ./dsm runb \
-      --app-name $(APPLICATION) \
+      --application $(APPLICATION) \
       --system $(SYSTEM) \
       --environment $(ENVIRONMENT) \
       --config .config.yml \
