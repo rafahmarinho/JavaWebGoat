@@ -5,16 +5,21 @@ pool:
   vmImage: ubuntu-latest
 
 steps:
+- task: GoTool@0
+  inputs:
+    version: '1.19'
+  displayName: 'Install Go'
+
 - script: |
-    # Criar diretório temporário
+    # Criar diretório de trabalho
     mkdir -p /tmp/dsmcli
     cd /tmp/dsmcli
     
-    # Download do DSM CLI
-    wget https://github.com/senhasegura/dsmcli/releases/latest/download/dsmcli_Linux_x86_64.tar.gz
+    # Clonar o repositório
+    git clone https://github.com/senhasegura/dsmcli.git .
     
-    # Extrair arquivo
-    tar xzvf dsmcli_Linux_x86_64.tar.gz
+    # Compilar o projeto
+    go build -o dsm
     
     # Criar diretório bin se não existir
     sudo mkdir -p /usr/local/bin
