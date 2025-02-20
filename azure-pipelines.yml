@@ -6,28 +6,84 @@ pool:
 
 steps:
 - script: |
-    # Criar diretório de trabalho
-    mkdir -p $(Pipeline.Workspace)/dsmcli
-    cd $(Pipeline.Workspace)/dsmcli
+    echo "=== [1/7] Verificando ambiente de trabalho ==="
+    echo "Diretório atual: $(pwd)"
+    echo "Conteúdo do diretório:"
+    ls -la
+    echo ""
     
-    # Clonar o repositório
+    echo "=== [2/7] Clonando repositório DSM CLI ==="
     git clone https://github.com/senhasegura/dsmcli.git .
+    if [ $? -ne 0 ]; then
+        echo "ERRO: Falha ao clonar repositório"
+        exit 1
+    fi
+    echo "Conteúdo após clone:"
+    ls -la
+    echo ""
     
-    # Criar arquivo de configuração
+    echo "=== [3/7] Verificando arquivo DSM ==="
+    if [ ! -f "dsm" ]; then
+        echo "ERRO: Arquivo dsm não encontrado"
+        exit 1
+    fi
+    echo "Permissões atuais do dsm:"
+    ls -la dsm
+    echo ""
+    
+    echo "=== [4/7] Configurando permissões ==="
+    chmod +x dsm
+    echo "Novas permissões do dsm:"
+    ls -la dsm
+    echo ""
+    
+    echo "=== [5/7] Criando arquivo de configuração ==="
+    echo "Criando .config.yml..."
     cat > .config.yml << EOF
     auth:
       url: $(DSM_URL)
       client-id: $(DSM_CLIENT_ID)
       client-secret: $(DSM_CLIENT_SECRET)
     EOF
+    if [ ! -f ".config.yml" ]; then
+        echo "ERRO: Falha ao criar arquivo de configuração"
+        exit 1
+    fi
+    echo "Arquivo de configuração criado com sucesso"
+    echo "Permissões do arquivo de configuração:"
+    ls -la .config.yml
+    echo ""
     
-    # Executar o DSM CLI
-    ./dsm runb \
+    echo "=== [6/7] Verificando variáveis de ambiente ==="
+    echo "APPLICATION: ${APPLICATION:-não definido}"
+    echo "SYSTEM: ${SYSTEM:-não definido}"
+    echo "ENVIRONMENT: ${ENVIRONMENT:-não definido}"
+    echo "DSM_URL: ${DSM_URL:-não definido}"
+    echo "DSM_CLIENT_ID: ${DSM_CLIENT_ID:-não definido}"
+    echo "DSM_CLIENT_SECRET: ***************"
+    echo ""
+    
+    echo "=== [7/7] Executando DSM CLI ==="
+    echo "Comando a ser executado:"
+    echo "dsm runb --app-name \${APPLICATION} --system \${SYSTEM} --environment \${ENVIRONMENT} --config .config.yml --tool azure-devops -v"
+    echo "Iniciando execução..."
+    $(Build.SourcesDirectory)/dsm runb \
       --app-name $(APPLICATION) \
       --system $(SYSTEM) \
       --environment $(ENVIRONMENT) \
       --config .config.yml \
       --tool azure-devops -v
+    
+    EXIT_CODE=$?
+    echo ""
+    echo "=== Resultado da execução ==="
+    echo "Código de saída: $EXIT_CODE"
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo "ERRO: DSM CLI falhou com código $EXIT_CODE"
+        exit $EXIT_CODE
+    fi
+    echo "Execução concluída com sucesso!"
+  workingDirectory: $(Build.SourcesDirectory)
   displayName: 'DSM CLI Running Belt execution'
   env:
     APPLICATION: $(APPLICATION)
