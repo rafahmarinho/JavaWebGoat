@@ -6,13 +6,19 @@ pool:
 
 steps:
 - script: |
-    echo "=== [1/7] Verificando ambiente de trabalho ==="
+    echo "=== [1/8] Verificando ambiente de trabalho ==="
     echo "Diretório atual: $(pwd)"
     echo "Conteúdo do diretório:"
     ls -la
     echo ""
     
-    echo "=== [2/7] Clonando repositório DSM CLI ==="
+    echo "=== [2/8] Criando diretório para DSM CLI ==="
+    mkdir -p $(Build.SourcesDirectory)/dsmcli
+    cd $(Build.SourcesDirectory)/dsmcli
+    echo "Novo diretório de trabalho: $(pwd)"
+    echo ""
+    
+    echo "=== [3/8] Clonando repositório DSM CLI ==="
     git clone https://github.com/senhasegura/dsmcli.git .
     if [ $? -ne 0 ]; then
         echo "ERRO: Falha ao clonar repositório"
@@ -22,7 +28,7 @@ steps:
     ls -la
     echo ""
     
-    echo "=== [3/7] Verificando arquivo DSM ==="
+    echo "=== [4/8] Verificando arquivo DSM ==="
     if [ ! -f "dsm" ]; then
         echo "ERRO: Arquivo dsm não encontrado"
         exit 1
@@ -31,13 +37,13 @@ steps:
     ls -la dsm
     echo ""
     
-    echo "=== [4/7] Configurando permissões ==="
+    echo "=== [5/8] Configurando permissões ==="
     chmod +x dsm
     echo "Novas permissões do dsm:"
     ls -la dsm
     echo ""
     
-    echo "=== [5/7] Criando arquivo de configuração ==="
+    echo "=== [6/8] Criando arquivo de configuração ==="
     echo "Criando .config.yml..."
     cat > .config.yml << EOF
     auth:
@@ -54,7 +60,7 @@ steps:
     ls -la .config.yml
     echo ""
     
-    echo "=== [6/7] Verificando variáveis de ambiente ==="
+    echo "=== [7/8] Verificando variáveis de ambiente ==="
     echo "APPLICATION: ${APPLICATION:-não definido}"
     echo "SYSTEM: ${SYSTEM:-não definido}"
     echo "ENVIRONMENT: ${ENVIRONMENT:-não definido}"
@@ -63,11 +69,11 @@ steps:
     echo "DSM_CLIENT_SECRET: ***************"
     echo ""
     
-    echo "=== [7/7] Executando DSM CLI ==="
+    echo "=== [8/8] Executando DSM CLI ==="
     echo "Comando a ser executado:"
     echo "dsm runb --app-name \${APPLICATION} --system \${SYSTEM} --environment \${ENVIRONMENT} --config .config.yml --tool azure-devops -v"
     echo "Iniciando execução..."
-    $(Build.SourcesDirectory)/dsm runb \
+    ./dsm runb \
       --app-name $(APPLICATION) \
       --system $(SYSTEM) \
       --environment $(ENVIRONMENT) \
