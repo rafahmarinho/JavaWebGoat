@@ -6,11 +6,26 @@ pool:
 
 steps:
 - script: |
-    # Download e instalação do DSM CLI
-    curl -L -o dsmcli.tar.gz https://github.com/senhasegura/dsmcli/releases/latest/download/dsmcli_Linux_x86_64.tar.gz
-    tar -xzf dsmcli.tar.gz
-    sudo mv dsm /usr/local/bin/
+    # Criar diretório temporário
+    mkdir -p /tmp/dsmcli
+    cd /tmp/dsmcli
+    
+    # Download do DSM CLI
+    wget https://github.com/senhasegura/dsmcli/releases/latest/download/dsmcli_Linux_x86_64.tar.gz
+    
+    # Extrair arquivo
+    tar xzvf dsmcli_Linux_x86_64.tar.gz
+    
+    # Criar diretório bin se não existir
+    sudo mkdir -p /usr/local/bin
+    
+    # Mover o executável e dar permissões
+    sudo cp dsm /usr/local/bin/
     sudo chmod +x /usr/local/bin/dsm
+    
+    # Limpar arquivos temporários
+    cd ..
+    rm -rf /tmp/dsmcli
   displayName: 'Install DSM CLI'
 
 - script: |
