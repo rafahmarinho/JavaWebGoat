@@ -1,20 +1,46 @@
 trigger:
 - main
- 
+
 pool:
   vmImage: ubuntu-latest
- 
+
 steps:
 - script: |
+    # Download e instalação do DSM CLI
+    curl -L -o dsmcli.tar.gz https://github.com/senhasegura/dsmcli/releases/latest/download/dsmcli_Linux_x86_64.tar.gz
+    tar -xzf dsmcli.tar.gz
+    sudo mv dsm /usr/local/bin/
+    sudo chmod +x /usr/local/bin/dsm
+  displayName: 'Install DSM CLI'
+
+- script: |
+    # Verificar a instalação
+    dsm version
+  displayName: 'Verify DSM CLI Installation'
+
+- script: |
+    # Criar arquivo de configuração
+    cat > .config.yml << EOF
+    auth:
+      url: $(DSM_URL)
+      client-id: $(DSM_CLIENT_ID)
+      client-secret: $(DSM_CLIENT_SECRET)
+    EOF
+  displayName: 'Create DSM Configuration'
+
+- script: |
     dsm runb \
-      --app-name $APPLICATION \
-      --system $SYSTEM \
-      --environment $ENVIRONMENT \
+      --app-name $(APPLICATION) \
+      --system $(SYSTEM) \
+      --environment $(ENVIRONMENT) \
       --config .config.yml \
-      --tool-name azure-devops \
-    rm .runb.vars
+      --tool-name azure-devops
+    rm -f .runb.vars
   displayName: 'DSM CLI Running Belt execution'
   env:
     APPLICATION: $(APPLICATION)
     SYSTEM: $(SYSTEM)
     ENVIRONMENT: $(ENVIRONMENT)
+    DSM_URL: $(DSM_URL)
+    DSM_CLIENT_ID: $(DSM_CLIENT_ID)
+    DSM_CLIENT_SECRET: $(DSM_CLIENT_SECRET)
