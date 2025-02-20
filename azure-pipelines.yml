@@ -11,31 +11,37 @@ steps:
   displayName: 'Install Go'
 
 - script: |
+    # Configurar GOPATH e ambiente Go
+    export GOPATH=$HOME/go
+    export PATH=$PATH:$GOPATH/bin
+    export GO111MODULE=on
+    
     # Criar diretório de trabalho
-    mkdir -p /tmp/dsmcli
-    cd /tmp/dsmcli
+    mkdir -p $GOPATH/src/github.com/senhasegura
+    cd $GOPATH/src/github.com/senhasegura
     
     # Clonar o repositório
-    git clone https://github.com/senhasegura/dsmcli.git .
+    git clone https://github.com/senhasegura/dsmcli.git
+    cd dsmcli
     
-    # Compilar o projeto
+    # Instalar dependências e compilar
+    go mod download
+    go mod tidy
     go build -o dsm
     
-    # Criar diretório bin se não existir
+    # Criar diretório bin se não existir e instalar
     sudo mkdir -p /usr/local/bin
-    
-    # Mover o executável e dar permissões
     sudo cp dsm /usr/local/bin/
     sudo chmod +x /usr/local/bin/dsm
     
-    # Limpar arquivos temporários
-    cd ..
-    rm -rf /tmp/dsmcli
+    # Verificar a instalação
+    which dsm
+    ls -l /usr/local/bin/dsm
   displayName: 'Install DSM CLI'
 
 - script: |
-    # Verificar a instalação
-    dsm version
+    # Verificar a instalação com caminho completo
+    /usr/local/bin/dsm version
   displayName: 'Verify DSM CLI Installation'
 
 - script: |
@@ -49,7 +55,7 @@ steps:
   displayName: 'Create DSM Configuration'
 
 - script: |
-    dsm runb \
+    /usr/local/bin/dsm runb \
       --app-name $(APPLICATION) \
       --system $(SYSTEM) \
       --environment $(ENVIRONMENT) \
