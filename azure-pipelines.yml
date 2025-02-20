@@ -5,46 +5,14 @@ pool:
   vmImage: ubuntu-latest
 
 steps:
-- task: GoTool@0
-  inputs:
-    version: '1.19'
-  displayName: 'Install Go'
-
 - script: |
-    # Configurar GOPATH e ambiente Go
-    export GOPATH=$HOME/go
-    export PATH=$PATH:$GOPATH/bin
-    export GO111MODULE=on
-    
     # Criar diretório de trabalho
-    mkdir -p $GOPATH/src/github.com/senhasegura
-    cd $GOPATH/src/github.com/senhasegura
+    mkdir -p $(Pipeline.Workspace)/dsmcli
+    cd $(Pipeline.Workspace)/dsmcli
     
     # Clonar o repositório
-    git clone https://github.com/senhasegura/dsmcli.git
-    cd dsmcli
+    git clone https://github.com/senhasegura/dsmcli.git .
     
-    # Instalar dependências e compilar
-    go mod download
-    go mod tidy
-    go build -o dsm
-    
-    # Criar diretório bin se não existir e instalar
-    sudo mkdir -p /usr/local/bin
-    sudo cp dsm /usr/local/bin/
-    sudo chmod +x /usr/local/bin/dsm
-    
-    # Verificar a instalação
-    which dsm
-    ls -l /usr/local/bin/dsm
-  displayName: 'Install DSM CLI'
-
-- script: |
-    # Verificar a instalação com caminho completo
-    /usr/local/bin/dsm version
-  displayName: 'Verify DSM CLI Installation'
-
-- script: |
     # Criar arquivo de configuração
     cat > .config.yml << EOF
     auth:
@@ -52,16 +20,14 @@ steps:
       client-id: $(DSM_CLIENT_ID)
       client-secret: $(DSM_CLIENT_SECRET)
     EOF
-  displayName: 'Create DSM Configuration'
-
-- script: |
-    /usr/local/bin/dsm runb \
+    
+    # Executar o DSM CLI
+    ./dsm runb \
       --app-name $(APPLICATION) \
       --system $(SYSTEM) \
       --environment $(ENVIRONMENT) \
       --config .config.yml \
-      --tool-name azure-devops
-    rm -f .runb.vars
+      --tool azure-devops -v
   displayName: 'DSM CLI Running Belt execution'
   env:
     APPLICATION: $(APPLICATION)
