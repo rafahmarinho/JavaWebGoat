@@ -19,11 +19,19 @@ stages:
           - bash: |
               curl -fsS https://tools.veracode.com/veracode-cli/install | sh
               ./veracode package --source . --output artifacts/$(BUILD_ID) --trust
-              # Descompacta qualquer zip criado pelo autopackage (opcional)
-              find artifacts/$(BUILD_ID) -name "*.zip" | while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
-              rm -rf artifacts/$(BUILD_ID)/*.zip
-              zip analysisPack.zip -r artifacts/$(BUILD_ID)
-              mv analysisPack.zip artifacts/$(BUILD_ID)/analysisPack.zip
+
+              # Extrai todos os zips encontrados recursivamente
+              find artifacts/$(BUILD_ID) -type f -name "*.zip" | while read filename; do
+                unzip -o -d "$(dirname "$filename")" "$filename"
+              done
+
+              # Remove todos os zips encontrados recursivamente
+              find artifacts/$(BUILD_ID) -type f -name "*.zip" -delete
+
+              # Gera o analysisPack.zip com todo o conteúdo do output
+              cd artifacts/$(BUILD_ID)
+              zip -r analysisPack.zip .
+              cd -
             displayName: Instalar CLI e Autopack Veracode
 
           - task: PublishBuildArtifacts@1
