@@ -1,6 +1,7 @@
 trigger: none
 
 variables:
+  group: 'Veracode Api Key' 
   PROJECT: 'LabTeste'
   ENVIRONMENT: 'Prod'
   BUILD_ID: 'latest'
@@ -64,13 +65,15 @@ stages:
             artifact: analysisPack
 
           - bash: |
-              if [ -f "analysisPack.zip" ]; then
-                echo "##vso[task.setvariable variable=artifact_file]analysisPack.zip"
+              ARTIFACT_PATH="$(find . -type f -name 'analysisPack.zip' | head -n1)"
+              if [ -f "$ARTIFACT_PATH" ]; then
+                echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
               else
                 echo "Erro: analysisPack.zip não encontrado"
                 exit 1
               fi
             displayName: Detectar Arquivo
+
 
           - bash: veracode-pipeline-scan -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) -file $(artifact_file) -fail_build true
             displayName: Executar Veracode Pipeline Scan
@@ -96,8 +99,10 @@ stages:
             displayName: Substituir Nome do Projeto
 
           - bash: |
-              ARTIFACT="analysisPack.zip"
-              if [ ! -f "$ARTIFACT" ]; then
+              ARTIFACT_PATH="$(find . -type f -name 'analysisPack.zip' | head -n1)"
+              if [ -f "$ARTIFACT_PATH" ]; then
+                echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
+              else
                 echo "Erro: analysisPack.zip não encontrado"
                 exit 1
               fi
