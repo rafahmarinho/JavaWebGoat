@@ -1,120 +1,162 @@
-trigger:
-- main
+trigger: none
 
-pool:
-  vmImage: ubuntu-latest
+variables:
+  PROJECT: 'LabTeste'
+  ENVIRONMENT: 'Prod'
+  BUILD_ID: 'latest'
+  ENVIRONMENT_PARAM: 'prod'
 
-steps:
-- script: |
-    echo "=== [1/9] Verificando ambiente de trabalho ==="
-    echo "Diretório atual: $(pwd)"
-    echo "Conteúdo do diretório:"
-    ls -la
-    echo ""
-    
-    echo "=== [2/9] Criando diretório para DSM CLI ==="
-    mkdir -p $(Build.SourcesDirectory)/dsmcli
-    cd $(Build.SourcesDirectory)/dsmcli
-    echo "Novo diretório de trabalho: $(pwd)"
-    echo ""
-    
-    echo "=== [3/9] Clonando repositório DSM CLI ==="
-    git clone https://github.com/senhasegura/dsmcli.git .
-    if [ $? -ne 0 ]; then
-        echo "ERRO: Falha ao clonar repositório"
-        exit 1
-    fi
-    echo "Conteúdo após clone:"
-    ls -la
-    echo ""
-    
-    echo "=== [4/9] Verificando executável Linux AMD64 ==="
-    if [ ! -f "bin/dsm-linux-amd64" ]; then
-        echo "ERRO: Executável Linux AMD64 não encontrado"
-        exit 1
-    fi
-    echo "Permissões do executável:"
-    ls -la bin/dsm-linux-amd64
-    echo ""
-    
-    echo "=== [5/9] Copiando e renomeando executável ==="
-    cp bin/dsm-linux-amd64 dsm
-    if [ ! -f "dsm" ]; then
-        echo "ERRO: Falha ao copiar executável"
-        exit 1
-    fi
-    echo "Executável copiado com sucesso"
-    echo ""
-    
-    echo "=== [6/9] Configurando permissões ==="
-    chmod +x dsm
-    echo "Novas permissões do dsm:"
-    ls -la dsm
-    echo ""
-    
-    echo "=== [7/9] Criando arquivo de configuração ==="
-    echo "Criando .config.yml..."
-    cat > .config.yml << EOF
-    auth:
-      url: $(DSM_URL)
-      client-id: $(DSM_CLIENT_ID)
-      client-secret: $(DSM_CLIENT_SECRET)
-    EOF
-    if [ ! -f ".config.yml" ]; then
-        echo "ERRO: Falha ao criar arquivo de configuração"
-        exit 1
-    fi
-    echo "Arquivo de configuração criado com sucesso"
-    echo "Permissões do arquivo de configuração:"
-    ls -la .config.yml
-    echo ""
-    
-    echo "=== [8/9] Verificando variáveis de ambiente ==="
-    echo "APPLICATION: ${APPLICATION:-não definido}"
-    echo "SYSTEM: ${SYSTEM:-não definido}"
-    echo "ENVIRONMENT: ${ENVIRONMENT:-não definido}"
-    echo "DSM_URL: ${DSM_URL:-não definido}"
-    echo "DSM_CLIENT_ID: ${DSM_CLIENT_ID:-não definido}"
-    echo "DSM_CLIENT_SECRET: ***************"
-    echo ""
-    
-    echo "=== [9/9] Executando DSM CLI ==="
-    # Configurar variáveis de ambiente do senhasegura
-    export SENHASEGURA_URL="${DSM_URL}"
-    export SENHASEGURA_CLIENT_ID="${DSM_CLIENT_ID}"
-    export SENHASEGURA_CLIENT_SECRET="${DSM_CLIENT_SECRET}"
-    
-    echo "Variáveis de ambiente do senhasegura configuradas:"
-    echo "SENHASEGURA_URL: ${SENHASEGURA_URL}"
-    echo "SENHASEGURA_CLIENT_ID: ${SENHASEGURA_CLIENT_ID}"
-    echo "SENHASEGURA_CLIENT_SECRET: ***************"
-    echo ""
-    
-    echo "Comando a ser executado:"
-    echo "dsm runb --application \${APPLICATION} --system \${SYSTEM} --environment \${ENVIRONMENT} --config .config.yml --tool azure-devops -v"
-    echo "Iniciando execução..."
-    ./dsm runb \
-      --application $(APPLICATION) \
-      --system $(SYSTEM) \
-      --environment $(ENVIRONMENT) \
-      --config .config.yml \
-      --tool azure-devops -v
-    
-    EXIT_CODE=$?
-    echo ""
-    echo "=== Resultado da execução ==="
-    echo "Código de saída: $EXIT_CODE"
-    if [ $EXIT_CODE -ne 0 ]; then
-        echo "ERRO: DSM CLI falhou com código $EXIT_CODE"
-        exit $EXIT_CODE
-    fi
-    echo "Execução concluída com sucesso!"
-  workingDirectory: $(Build.SourcesDirectory)
-  displayName: 'DSM CLI Running Belt execution'
-  env:
-    APPLICATION: $(APPLICATION)
-    SYSTEM: $(SYSTEM)
-    ENVIRONMENT: $(ENVIRONMENT)
-    DSM_URL: $(DSM_URL)
-    DSM_CLIENT_ID: $(DSM_CLIENT_ID)
-    DSM_CLIENT_SECRET: $(DSM_CLIENT_SECRET)
+stages:
+  - stage: AutoPack
+    displayName: AutoPack
+    jobs:
+      - job: Build
+        pool:
+          vmImage: 'ubuntu-22.04'
+        steps:
+          - checkout: self
+
+          - bash: |
+              if [ -f "pom.xml" ]; then
+                echo "##vso[task.setvariable variable=JAVA_MAVEN]true"
+              else
+                echo "##vso[task.setvariable variable=JAVA_MAVEN]false"
+              fi
+            displayName: Detectar Projeto Java-Maven
+
+          - bash: |
+              JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
+              if [[ "$JAVA_VERSION" == "11" ]]; then
+                JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
+              fi
+              echo "##vso[task.setvariable variable=JAVA_VERSION]$JAVA_VERSION"
+            condition: eq(variables['JAVA_MAVEN'], 'true')
+            displayName: Detectar versão do Java
+
+          - task: JavaToolInstaller@0
+            inputs:
+              versionSpec: '$(JAVA_VERSION)'
+              jdkArchitecture: 'x64'
+              jdkSourceOption: 'PreInstalled'
+            condition: eq(variables['JAVA_MAVEN'], 'true')
+
+          - bash: mvn clean package
+            condition: eq(variables['JAVA_MAVEN'], 'true')
+            displayName: Compilar Projeto Maven
+
+          - bash: |
+              mkdir -p artifacts/$(BUILD_ID)
+              WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
+              JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
+
+              if [ -f "$WAR_FILE" ]; then
+                echo "WAR encontrado: $WAR_FILE"
+                cp "$WAR_FILE" artifacts/$(BUILD_ID)/application.war
+              elif [ -f "$JAR_FILE" ]; then
+                echo "JAR encontrado: $JAR_FILE"
+                cp "$JAR_FILE" artifacts/$(BUILD_ID)/application.jar
+              else
+                curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+                ./veracode package --source . --output artifacts/$(BUILD_ID) --trust
+                find artifacts/$(BUILD_ID) -name "*.zip" | while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
+                rm -rf artifacts/$(BUILD_ID)/*.zip
+                zip analysisPack.zip -r artifacts/$(BUILD_ID)
+                mv analysisPack.zip artifacts/$(BUILD_ID)/analysisPack.zip
+              fi
+            displayName: Instalar CLI e Autopack Veracode
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: 'artifacts/$(BUILD_ID)'
+              ArtifactName: 'analysisPack'
+              publishLocation: 'Container'
+
+  - stage: SCA
+    displayName: Veracode SCA
+    jobs:
+      - job: SCA
+        pool:
+          vmImage: 'ubuntu-22.04'
+        steps:
+          - checkout: self
+          - bash: curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
+            env:
+              SRCCLR_API_TOKEN: $(SCA)
+
+  - stage: Scan
+    displayName: Veracode Scan
+    dependsOn: AutoPack
+    jobs:
+      - job: Scan
+        pool:
+          vmImage: 'ubuntu-22.04'
+        steps:
+          - download: current
+            artifact: analysisPack
+
+          - bash: |
+              WAR_FILE=$(find . -name "*.war" | head -n 1)
+              JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
+
+              if [ -f "$WAR_FILE" ]; then
+                echo "##vso[task.setvariable variable=artifact_file]$WAR_FILE"
+              elif [ -f "$JAR_FILE" ]; then
+                echo "##vso[task.setvariable variable=artifact_file]$JAR_FILE"
+              elif [ -f "analysisPack.zip" ]; then
+                echo "##vso[task.setvariable variable=artifact_file]analysisPack.zip"
+              else
+                echo "Erro: Nenhum WAR/JAR ou analysisPack.zip"
+                exit 1
+              fi
+            displayName: Detectar Arquivo
+
+          - bash: veracode-pipeline-scan -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) -file $(artifact_file) -fail_build true
+            displayName: Executar Veracode Pipeline Scan
+
+  - stage: SAST
+    displayName: Veracode SAST
+    dependsOn: AutoPack
+    jobs:
+      - job: SAST
+        pool:
+          vmImage: 'ubuntu-22.04'
+        steps:
+          - download: current
+            artifact: analysisPack
+
+          - bash: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+            displayName: Baixar Wrapper
+
+          - bash: |
+              declare -A PROJECT_MAP=( ["nomeprojeto1"]="novonomeprojeto" ["nomeprojeto02"]="novonomeprojeto02" )
+              FINAL_PROJ=${PROJECT_MAP[$PROJ]:-$PROJ}
+              echo "##vso[task.setvariable variable=PROJECT_SUB]$FINAL_PROJ"
+            displayName: Substituir Nome do Projeto
+
+          - bash: |
+              WAR=$(find . -maxdepth 2 -name "*.war" | head -n 1)
+              JAR=$(find . -maxdepth 2 -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n 1)
+              ARTIFACT=${WAR:-${JAR:-analysisPack.zip}}
+
+              if [ "$(ENVIRONMENT_PARAM)" == "prod" ]; then
+                java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+                  -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) \
+                  -action uploadandscan \
+                  -appname "$(PROJECT_SUB)" \
+                  -version "$(BUILD_ID)" \
+                  -filepath "$ARTIFACT" \
+                  -createprofile true \
+                  -deleteincompletescan 2 \
+                  -createsandbox false
+              else
+                java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+                  -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) \
+                  -action uploadandscan \
+                  -appname "$(PROJECT_SUB)" \
+                  -version "$(BUILD_ID)" \
+                  -filepath "$ARTIFACT" \
+                  -createprofile true \
+                  -deleteincompletescan 2 \
+                  -createsandbox true \
+                  -sandboxname "$(ENVIRONMENT_PARAM)"
+            displayName: Executar Veracode SAST
