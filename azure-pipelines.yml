@@ -17,52 +17,13 @@ stages:
           - checkout: self
 
           - bash: |
-              if [ -f "pom.xml" ]; then
-                echo "##vso[task.setvariable variable=JAVA_MAVEN]true"
-              else
-                echo "##vso[task.setvariable variable=JAVA_MAVEN]false"
-              fi
-            displayName: Detectar Projeto Java-Maven
-
-          - bash: |
-              JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-              if [[ "$JAVA_VERSION" == "11" ]]; then
-                JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
-              fi
-              echo "##vso[task.setvariable variable=JAVA_VERSION]$JAVA_VERSION"
-            condition: eq(variables['JAVA_MAVEN'], 'true')
-            displayName: Detectar versão do Java
-
-          - task: JavaToolInstaller@0
-            inputs:
-              versionSpec: '$(JAVA_VERSION)'
-              jdkArchitectureOption: 'x64'
-              jdkSourceOption: 'PreInstalled'
-            condition: eq(variables['JAVA_MAVEN'], 'true')
-
-          - bash: mvn clean package
-            condition: eq(variables['JAVA_MAVEN'], 'true')
-            displayName: Compilar Projeto Maven
-
-          - bash: |
-              mkdir -p artifacts/$(BUILD_ID)
-              WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
-              JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
-
-              if [ -f "$WAR_FILE" ]; then
-                echo "WAR encontrado: $WAR_FILE"
-                cp "$WAR_FILE" artifacts/$(BUILD_ID)/application.war
-              elif [ -f "$JAR_FILE" ]; then
-                echo "JAR encontrado: $JAR_FILE"
-                cp "$JAR_FILE" artifacts/$(BUILD_ID)/application.jar
-              else
-                curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-                ./veracode package --source . --output artifacts/$(BUILD_ID) --trust
-                find artifacts/$(BUILD_ID) -name "*.zip" | while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
-                rm -rf artifacts/$(BUILD_ID)/*.zip
-                zip analysisPack.zip -r artifacts/$(BUILD_ID)
-                mv analysisPack.zip artifacts/$(BUILD_ID)/analysisPack.zip
-              fi
+              curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+              ./veracode package --source . --output artifacts/$(BUILD_ID) --trust
+              # Descompacta qualquer zip criado pelo autopackage (opcional)
+              find artifacts/$(BUILD_ID) -name "*.zip" | while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
+              rm -rf artifacts/$(BUILD_ID)/*.zip
+              zip analysisPack.zip -r artifacts/$(BUILD_ID)
+              mv analysisPack.zip artifacts/$(BUILD_ID)/analysisPack.zip
             displayName: Instalar CLI e Autopack Veracode
 
           - task: PublishBuildArtifacts@1
@@ -95,17 +56,10 @@ stages:
             artifact: analysisPack
 
           - bash: |
-              WAR_FILE=$(find . -name "*.war" | head -n 1)
-              JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
-
-              if [ -f "$WAR_FILE" ]; then
-                echo "##vso[task.setvariable variable=artifact_file]$WAR_FILE"
-              elif [ -f "$JAR_FILE" ]; then
-                echo "##vso[task.setvariable variable=artifact_file]$JAR_FILE"
-              elif [ -f "analysisPack.zip" ]; then
+              if [ -f "analysisPack.zip" ]; then
                 echo "##vso[task.setvariable variable=artifact_file]analysisPack.zip"
               else
-                echo "Erro: Nenhum WAR/JAR ou analysisPack.zip"
+                echo "Erro: analysisPack.zip não encontrado"
                 exit 1
               fi
             displayName: Detectar Arquivo
@@ -134,10 +88,11 @@ stages:
             displayName: Substituir Nome do Projeto
 
           - bash: |
-              WAR=$(find . -maxdepth 2 -name "*.war" | head -n 1)
-              JAR=$(find . -maxdepth 2 -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n 1)
-              ARTIFACT=${WAR:-${JAR:-analysisPack.zip}}
-
+              ARTIFACT="analysisPack.zip"
+              if [ ! -f "$ARTIFACT" ]; then
+                echo "Erro: analysisPack.zip não encontrado"
+                exit 1
+              fi
               if [ "$(ENVIRONMENT_PARAM)" == "prod" ]; then
                 java -jar vosp-api-wrappers-java-24.7.14.0.jar \
                   -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) \
