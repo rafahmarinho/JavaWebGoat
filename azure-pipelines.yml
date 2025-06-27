@@ -39,6 +39,15 @@ steps:
       echo "##vso[task.prependpath]$(Agent.TempDirectory)/jdk23/bin"
     displayName: "Baixar e instalar Java 23"
 
+  - bash: |
+      echo "JAVA_HOME: $JAVA_HOME"
+      java -version
+      mvn -version
+      mvn clean package
+    displayName: "Compilar Projeto Maven"
+    env:
+      JAVA_HOME: $(JAVA_HOME)
+
   - task: JavaToolInstaller@0
     displayName: Instalar Java Necessário
     inputs:
