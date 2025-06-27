@@ -12,10 +12,15 @@ stages:
     steps:
     # Baixa e instala a CLI do Veracode
     - script: |
+        set -e
+        set -x
         curl -fsS https://tools.veracode.com/veracode-cli/install | sh
         ./veracode package --source . --type directory --output $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) --trust
+        ls -lhaR $(Build.ArtifactStagingDirectory)/artifacts/
+        echo "Renomeando o arquivo ZIP gerado..."
+        find $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) -name "*.zip"
         mv $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/*.zip $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip
-        ls -l $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)
+        ls -lhaR $(Build.ArtifactStagingDirectory)/artifacts/
       env:
         VERACODE_API_KEY_ID: $(APIID)
         VERACODE_API_KEY_SECRET: $(APIKEY)
