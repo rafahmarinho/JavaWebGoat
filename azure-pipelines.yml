@@ -25,7 +25,7 @@ steps:
 - script: |
     curl -fsS https://tools.veracode.com/veracode-cli/install | sh
     export PATH="/home/vsts/work/1/s/:$PATH"
-    veracode package --source . --output $(srcPack) --trust
+    veracode package --source . --output $(srcPack) --trust --verbose
     mv $(srcPack)/*.zip $(srcPack)/analisysPack.zip
   displayName: 'Veracode Auto-Package'
 
