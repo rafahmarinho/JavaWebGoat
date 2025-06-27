@@ -13,10 +13,6 @@ variables:
   - name: analisysPack
     value: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId)/analisysPack.zip'
 steps:
-# - task: CmdLine@2
-#   inputs:
-#     script: 'npm install'
-#   displayName: 'NPM'
 
 - task: CmdLine@2
   inputs:
