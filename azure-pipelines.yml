@@ -51,7 +51,7 @@ stages:
           - checkout: self
           - bash: curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
             env:
-              SRCCLR_API_TOKEN: $(SRCCLR_API_TOKEN)
+              SRCCLR_API_TOKEN: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NTUxNzk2LCJleHAiOjE3NTEwMDM5MzIsImF1dGhvcml0aWVzIjoiQUdFTlQiLCJqdGkiOiJmOGY1YTg5ZS1jZGEwLTQ0ZTItOWFmZC1lYTUwZDk5YTM3YzciLCJjbGllbnRfaWQiOiIiLCJzY29wZSI6W119.TylrM59Rw4U2L-E7PB7Sqs7ywrLA6m29UZhPEyCRmvpKkg-9-bUjclkrr_dEjVO6DO592WLPlcDYR6O_Vz7Fl_eQTKLxaGb6ttTI9SDQQypFS1UfUOhgR6gKLvJ5VU9UNk3EuqrjawSemyaSz8mVfghMHhsmqqvwVIizJmXkErU
 
   - stage: Scan
     displayName: Veracode Scan
@@ -96,11 +96,9 @@ stages:
               PIPELINE_WORKSPACE: $(Pipeline.Workspace)
 
 
-          - bash: veracode-pipeline-scan -vid $VERACODE_APIID -vkey $VERACODE_APIKEY -file $ARTIFACT_FILE -fail_build true
+          - bash: veracode-pipeline-scan -vid a5c076c36bbaa3aa9482033c3f7745b0 -vkey 422be44116a9d6309a4734c42130fa0ada09ebcfc4f5d677f57c700db034ff93392e809225df9a4485729b967e5a6b8b217834ad12b8a1e16b479278acf366b8 -file $ARTIFACT_FILE -fail_build true
             displayName: Executar Veracode Pipeline Scan
             env:
-              VERACODE_APIID: $(APIID)
-              VERACODE_APIKEY: $(APIKEY)
               ARTIFACT_FILE: $(artifact_file)
 
   - stage: SAST
@@ -119,11 +117,9 @@ stages:
 
           - bash: |
               declare -A PROJECT_MAP=( ["nomeprojeto1"]="novonomeprojeto" ["nomeprojeto02"]="novonomeprojeto02" )
-              FINAL_PROJ=${PROJECT_MAP[$PROJECT_NAME]:-$PROJECT_NAME}
+              FINAL_PROJ=${PROJECT_MAP["LabTeste"]:-"LabTeste"}
               echo "##vso[task.setvariable variable=PROJECT_SUB]$FINAL_PROJ"
             displayName: Substituir Nome do Projeto
-            env:
-              PROJECT_NAME: $(PROJECT)
 
           - bash: |
               echo "Diretório de trabalho atual: $(pwd)"
@@ -152,39 +148,42 @@ stages:
                   exit 1
                 fi
               fi
-              
+            displayName: Detectar Arquivo
+            env:
+              PIPELINE_WORKSPACE: $(Pipeline.Workspace)
+
+          - bash: |
               echo "Executando Veracode SAST com arquivo: $ARTIFACT_FILE"
-              echo "APIID: $VERACODE_APIID"
-              echo "Environment: $ENV_PARAM"
+              echo "APIID: a5c076c36bbaa3aa9482033c3f7745b0"
+              echo "Environment: prod"
+              echo "Project: $PROJECT_NAME"
+              echo "Build Version: latest"
               
-              if [ "$ENV_PARAM" == "prod" ]; then
+              if [ "prod" == "prod" ]; then
                 java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                  -vid $VERACODE_APIID -vkey $VERACODE_APIKEY \
+                  -vid a5c076c36bbaa3aa9482033c3f7745b0 \
+                  -vkey 422be44116a9d6309a4734c42130fa0ada09ebcfc4f5d677f57c700db034ff93392e809225df9a4485729b967e5a6b8b217834ad12b8a1e16b479278acf366b8 \
                   -action uploadandscan \
                   -appname "$PROJECT_NAME" \
-                  -version "$BUILD_VERSION" \
+                  -version "latest" \
                   -filepath "$ARTIFACT_FILE" \
                   -createprofile true \
                   -deleteincompletescan 2 \
                   -createsandbox false
               else
                 java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                  -vid $VERACODE_APIID -vkey $VERACODE_APIKEY \
+                  -vid a5c076c36bbaa3aa9482033c3f7745b0 \
+                  -vkey 422be44116a9d6309a4734c42130fa0ada09ebcfc4f5d677f57c700db034ff93392e809225df9a4485729b967e5a6b8b217834ad12b8a1e16b479278acf366b8 \
                   -action uploadandscan \
                   -appname "$PROJECT_NAME" \
-                  -version "$BUILD_VERSION" \
+                  -version "latest" \
                   -filepath "$ARTIFACT_FILE" \
                   -createprofile true \
                   -deleteincompletescan 2 \
                   -createsandbox true \
-                  -sandboxname "$ENV_PARAM"
+                  -sandboxname "prod"
               fi
             displayName: Executar Veracode SAST
             env:
-              PIPELINE_WORKSPACE: $(Pipeline.Workspace)
               ARTIFACT_FILE: $(artifact_file)
-              VERACODE_APIID: $(APIID)
-              VERACODE_APIKEY: $(APIKEY)
               PROJECT_NAME: $(PROJECT_SUB)
-              BUILD_VERSION: $(BUILD_ID)
-              ENV_PARAM: $(ENVIRONMENT_PARAM)
