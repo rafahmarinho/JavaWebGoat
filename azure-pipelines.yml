@@ -12,69 +12,116 @@ variables:
     value: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId)'
   - name: analisysPack
     value: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId)/analisysPack.zip'
+
 steps:
+  - bash: |
+      if [ -f "pom.xml" ]; then
+        echo "##vso[task.setvariable variable=JAVA_MAVEN]true"
+      else
+        echo "##vso[task.setvariable variable=JAVA_MAVEN]false"
+      fi
+    displayName: Detectar Projeto Java-Maven
 
-- task: CmdLine@2
-  inputs:
-    script: |
-      export JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64
-      export PATH=$JAVA_HOME/bin:$PATH
-      java -version
-  displayName: 'Force Java 21 (Default Agent)'
+  - bash: |
+      JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
+      if [[ "$JAVA_VERSION" == "11" ]]; then
+        JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
+      fi
+      echo "##vso[task.setvariable variable=JAVA_VERSION]$JAVA_VERSION"
+    displayName: Detectar versão do Java
+    condition: eq(variables['JAVA_MAVEN'], 'true')
 
-- script: |
-    curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-    export PATH="/home/vsts/work/1/s/:$PATH"
-    veracode package --source . --output $(srcPack) --trust --verbose
-    mv $(srcPack)/*.zip $(srcPack)/analisysPack.zip
-  displayName: 'Veracode Auto-Package'
+  - task: JavaToolInstaller@0
+    displayName: Instalar Java Necessário
+    inputs:
+      versionSpec: '$(JAVA_VERSION)'
+      jdkArchitecture: 'x64'
+      jdkSourceOption: 'PreInstalled'
+    condition: eq(variables['JAVA_MAVEN'], 'true')
 
-- task: CmdLine@2
-  inputs:
-    script: |
-      export SRCCLR_API_TOKEN=$(SRCCLR_API_TOKEN)
-      curl -sSL https://download.sourceclear.com/ci.sh | bash -s – scan --update-advisor --allow-dirty
-  displayName: 'Veracode SCA'
-  continueOnError: true
+  - bash: mvn clean package
+    displayName: Compilar Projeto Maven
+    condition: eq(variables['JAVA_MAVEN'], 'true')
 
-- script: |
-    curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
-  displayName: 'Download Pipeline Scanner'
+  - bash: |
+      mkdir -p $(srcPack)
+      WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
+      JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
 
-- task: ExtractFiles@1
-  inputs:
-    archiveFilePatterns: 'pipeline-scan-LATEST.zip'
-    destinationFolder: '$(Build.ArtifactStagingDirectory)'
-    cleanDestinationFolder: false
-- script: |
+      if [ -f "$WAR_FILE" ]; then
+        echo "WAR encontrado: $WAR_FILE"
+        cp "$WAR_FILE" $(srcPack)/application.war
+      elif [ -f "$JAR_FILE" ]; then
+        echo "JAR encontrado: $JAR_FILE"
+        cp "$JAR_FILE" $(srcPack)/application.jar
+      else
+        curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+        ./veracode package --source . --output $(srcPack) --trust
+        find $(srcPack) -name "*.zip" | while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
+        rm -rf $(srcPack)/*.zip
+        cd $(srcPack)
+        zip -r analysisPack.zip .
+        mv analysisPack.zip $(analisysPack)
+      fi
+    displayName: Instalar CLI e Autopack Veracode
+
+  - task: CmdLine@2
+    displayName: 'Veracode Auto-Package'
+    inputs:
+      script: |
+        curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+        export PATH="/home/vsts/work/1/s/:$PATH"
+        ./veracode package --source . --output $(srcPack) --trust
+        mv $(srcPack)/*.zip $(analisysPack)
+
+  - task: CmdLine@2
+    displayName: 'Veracode SCA'
+    inputs:
+      script: |
+        export SRCCLR_API_TOKEN=$(SRCCLR_API_TOKEN)
+        curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
+    continueOnError: true
+
+  - script: |
+      curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+    displayName: 'Download Pipeline Scanner'
+
+  - task: ExtractFiles@1
+    displayName: 'Extrair Pipeline Scanner'
+    inputs:
+      archiveFilePatterns: 'pipeline-scan-LATEST.zip'
+      destinationFolder: '$(Build.ArtifactStagingDirectory)'
+      cleanDestinationFolder: false
+
+  - script: |
       java -jar $(Build.ArtifactStagingDirectory)/pipeline-scan.jar -vid $(APIID) -vkey $(APIKEY) --file '$(analisysPack)' --issue_details true 
-  displayName: 'Veracode PipelineScan'
-  continueOnError: true
+    displayName: 'Veracode PipelineScan'
+    continueOnError: true
 
-- task: Veracode@3
-  inputs:
-    ConnectionDetailsSelection: 'Credentials'
-    apiId: '$(APIID)'
-    apiKey: '$(APIKEY)'
-    veracodeAppProfile: '$(veracodeAppProfile)'
-    version: '$(build.buildNumber)'
-    filepath: '$(analisysPack)'
-    createSandBox: false
-    createProfile: true
-    importResults: false
-    failBuildOnPolicyFail: false
-  displayName: 'Veracode SAST'
+  - task: Veracode@3
+    displayName: 'Veracode SAST'
+    inputs:
+      ConnectionDetailsSelection: 'Credentials'
+      apiId: '$(APIID)'
+      apiKey: '$(APIKEY)'
+      veracodeAppProfile: '$(veracodeAppProfile)'
+      version: '$(build.buildNumber)'
+      filepath: '$(analisysPack)'
+      createSandBox: false
+      createProfile: true
+      importResults: false
+      failBuildOnPolicyFail: false
 
-# - task: Veracode Flaw Importer@3
-#   inputs:
-#     ConnectionDetailsSelection: 'Credentials'
-#     apiId: '$(APIID)'
-#     apiKey: '$(APIKEY)'
-#     veracodeAppProfile: '$(veracodeAppProfile)'
-#     sandboxName: 
-#     importType: 'All Flaws'
-#     workItemType: 'Issue'
-#     area: '$(system.teamProject)'
-#     addCustomTag: '$(build.buildNumber)'
-#     flawImportLimit: '1000'
-#   displayName: 'Veracode importando falhas'
+  # - task: Veracode Flaw Importer@3
+  #   displayName: 'Veracode importando falhas'
+  #   inputs:
+  #     ConnectionDetailsSelection: 'Credentials'
+  #     apiId: '$(APIID)'
+  #     apiKey: '$(APIKEY)'
+  #     veracodeAppProfile: '$(veracodeAppProfile)'
+  #     sandboxName: 
+  #     importType: 'All Flaws'
+  #     workItemType: 'Issue'
+  #     area: '$(system.teamProject)'
+  #     addCustomTag: '$(build.buildNumber)'
+  #     flawImportLimit: '1000'
