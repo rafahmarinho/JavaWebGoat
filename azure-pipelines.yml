@@ -65,11 +65,19 @@ stages:
             artifact: analysisPack
 
           - bash: |
+              echo "Listando arquivos no diretório atual:"
+              find . -name "*.zip" -type f
+              echo "Procurando por analysisPack.zip..."
               ARTIFACT_PATH="$(find . -type f -name 'analysisPack.zip' | head -n1)"
               if [ -f "$ARTIFACT_PATH" ]; then
+                echo "Arquivo encontrado: $ARTIFACT_PATH"
                 echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
               else
                 echo "Erro: analysisPack.zip não encontrado"
+                echo "Conteúdo do diretório atual:"
+                ls -la
+                echo "Estrutura de diretórios:"
+                find . -type f -name "*.zip"
                 exit 1
               fi
             displayName: Detectar Arquivo
@@ -94,25 +102,35 @@ stages:
 
           - bash: |
               declare -A PROJECT_MAP=( ["nomeprojeto1"]="novonomeprojeto" ["nomeprojeto02"]="novonomeprojeto02" )
-              FINAL_PROJ=${PROJECT_MAP[$PROJ]:-$PROJ}
+              FINAL_PROJ=${PROJECT_MAP[$(PROJECT)]:-$(PROJECT)}
               echo "##vso[task.setvariable variable=PROJECT_SUB]$FINAL_PROJ"
             displayName: Substituir Nome do Projeto
 
           - bash: |
+              echo "Listando arquivos no diretório atual:"
+              find . -name "*.zip" -type f
+              echo "Procurando por analysisPack.zip..."
               ARTIFACT_PATH="$(find . -type f -name 'analysisPack.zip' | head -n1)"
               if [ -f "$ARTIFACT_PATH" ]; then
+                echo "Arquivo encontrado: $ARTIFACT_PATH"
                 echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
               else
                 echo "Erro: analysisPack.zip não encontrado"
+                echo "Conteúdo do diretório atual:"
+                ls -la
+                echo "Estrutura de diretórios:"
+                find . -type f -name "*.zip"
                 exit 1
               fi
+              
+              echo "Executando Veracode SAST com arquivo: $(artifact_file)"
               if [ "$(ENVIRONMENT_PARAM)" == "prod" ]; then
                 java -jar vosp-api-wrappers-java-24.7.14.0.jar \
                   -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) \
                   -action uploadandscan \
                   -appname "$(PROJECT_SUB)" \
                   -version "$(BUILD_ID)" \
-                  -filepath "$ARTIFACT" \
+                  -filepath "$(artifact_file)" \
                   -createprofile true \
                   -deleteincompletescan 2 \
                   -createsandbox false
@@ -122,9 +140,10 @@ stages:
                   -action uploadandscan \
                   -appname "$(PROJECT_SUB)" \
                   -version "$(BUILD_ID)" \
-                  -filepath "$ARTIFACT" \
+                  -filepath "$(artifact_file)" \
                   -createprofile true \
                   -deleteincompletescan 2 \
                   -createsandbox true \
                   -sandboxname "$(ENVIRONMENT_PARAM)"
+              fi
             displayName: Executar Veracode SAST
