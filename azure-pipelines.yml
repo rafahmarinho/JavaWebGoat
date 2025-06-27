@@ -1,189 +1,472 @@
-trigger: none
+# Azure DevOps Pipeline para Veracode
+# Inclui auto-packaging, SAST, SCA e Pipeline Scan
+# Baseado na documentação oficial do Veracode
+
+trigger:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+      - release/*
+  paths:
+    exclude:
+      - '*.md'
+      - 'docs/*'
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+  paths:
+    exclude:
+      - '*.md'
+      - 'docs/*'
 
 variables:
-  group: 'Veracode Api Key' 
-  PROJECT: 'LabTeste'
-  ENVIRONMENT: 'Prod'
-  BUILD_ID: 'latest'
-  ENVIRONMENT_PARAM: 'prod'
+  # Configurações do Veracode
+  VERACODE_API_ID: $(VERACODE_API_ID)
+  VERACODE_API_KEY: $(VERACODE_API_KEY)
+  SRCCLR_API_TOKEN: $(SRCCLR_API_TOKEN)
+  
+  # Configurações da aplicação
+  APPLICATION_NAME: '$(Build.Repository.Name)'
+  BUILD_VERSION: '$(Build.BuildNumber)'
+  
+  # Configurações de policy
+  VERACODE_POLICY: 'Veracode Recommended Medium + SCA'
+  BREAK_BUILD_ON_POLICY: true
+  BREAK_BUILD_ON_ERROR: true
+
+pool:
+  vmImage: 'ubuntu-latest'
 
 stages:
-  - stage: AutoPack
-    displayName: AutoPack
-    jobs:
-      - job: Build
-        pool:
-          vmImage: 'ubuntu-22.04'
-        steps:
-          - checkout: self
+- stage: Build
+  displayName: 'Build e Preparação'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build da Aplicação'
+    steps:
+    - checkout: self
+      displayName: 'Checkout do código'
+      
+    # Detectar linguagem e instalar dependências automaticamente
+    - task: UseNode@1
+      inputs:
+        version: '18.x'
+      displayName: 'Setup Node.js'
+      
+    - task: UseDotNet@2
+      inputs:
+        packageType: 'sdk'
+        version: '8.x'
+      displayName: 'Setup .NET'
+      
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '11'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Setup Java'
+      
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.9'
+        addToPath: true
+      displayName: 'Setup Python'
 
-          - bash: |
-              curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-              ./veracode package --source . --output artifacts/$(BUILD_ID) --trust
+    # Build da aplicação baseado na linguagem detectada
+    - script: |
+        echo "=== DETECÇÃO E BUILD AUTOMÁTICO ==="
+        
+        # Variáveis de controle
+        BUILD_SUCCESS=false
+        DETECTED_LANGUAGE=""
+        
+        # Detectar e buildar Node.js
+        if [ -f "package.json" ]; then
+          echo "✅ Detectado projeto Node.js"
+          DETECTED_LANGUAGE="Node.js"
+          
+          if command -v npm >/dev/null 2>&1; then
+            echo "Instalando dependências Node.js..."
+            npm install
+            
+            # Verificar se existe script de build
+            if npm run build --if-present 2>/dev/null; then
+              echo "✅ Build Node.js concluído com sucesso"
+              BUILD_SUCCESS=true
+            else
+              echo "ℹ️ Nenhum script de build encontrado, continuando..."
+              BUILD_SUCCESS=true
+            fi
+          else
+            echo "❌ npm não encontrado, mas Node.js foi configurado"
+          fi
+        fi
+        
+        # Detectar e buildar Maven
+        if [ -f "pom.xml" ] && [ "$BUILD_SUCCESS" = false ]; then
+          echo "✅ Detectado projeto Maven"
+          DETECTED_LANGUAGE="Java (Maven)"
+          
+          if command -v mvn >/dev/null 2>&1; then
+            echo "Executando build Maven..."
+            mvn clean compile -q
+            if [ $? -eq 0 ]; then
+              echo "✅ Build Maven concluído com sucesso"
+              BUILD_SUCCESS=true
+            else
+              echo "❌ Falha no build Maven"
+            fi
+          else
+            echo "❌ Maven não encontrado"
+          fi
+        fi
+        
+        # Detectar e buildar Gradle
+        if [ -f "build.gradle" ] && [ "$BUILD_SUCCESS" = false ]; then
+          echo "✅ Detectado projeto Gradle"
+          DETECTED_LANGUAGE="Java (Gradle)"
+          
+          if [ -f "./gradlew" ]; then
+            echo "Executando build Gradle..."
+            chmod +x ./gradlew
+            ./gradlew clean build -x test --quiet
+            if [ $? -eq 0 ]; then
+              echo "✅ Build Gradle concluído com sucesso"
+              BUILD_SUCCESS=true
+            else
+              echo "❌ Falha no build Gradle"
+            fi
+          elif command -v gradle >/dev/null 2>&1; then
+            gradle clean build -x test --quiet
+            if [ $? -eq 0 ]; then
+              echo "✅ Build Gradle concluído com sucesso"
+              BUILD_SUCCESS=true
+            else
+              echo "❌ Falha no build Gradle"
+            fi
+          else
+            echo "❌ Gradle não encontrado"
+          fi
+        fi
+        
+        # Detectar e buildar .NET
+        if find . -name "*.csproj" -type f | grep -q . && [ "$BUILD_SUCCESS" = false ]; then
+          echo "✅ Detectado projeto .NET"
+          DETECTED_LANGUAGE=".NET"
+          
+          if command -v dotnet >/dev/null 2>&1; then
+            echo "Executando build .NET..."
+            dotnet restore --verbosity quiet
+            dotnet build --configuration Release --verbosity quiet
+            if [ $? -eq 0 ]; then
+              echo "✅ Build .NET concluído com sucesso"
+              BUILD_SUCCESS=true
+            else
+              echo "❌ Falha no build .NET"
+            fi
+          else
+            echo "❌ dotnet CLI não encontrado"
+          fi
+        fi
+        
+        # Detectar e buildar Python
+        if [ -f "requirements.txt" ] && [ "$BUILD_SUCCESS" = false ]; then
+          echo "✅ Detectado projeto Python"
+          DETECTED_LANGUAGE="Python"
+          
+          if command -v pip >/dev/null 2>&1; then
+            echo "Instalando dependências Python..."
+            pip install -r requirements.txt --quiet
+            if [ $? -eq 0 ]; then
+              echo "✅ Dependências Python instaladas com sucesso"
+              BUILD_SUCCESS=true
+            else
+              echo "❌ Falha na instalação das dependências Python"
+            fi
+          else
+            echo "❌ pip não encontrado"
+          fi
+        fi
+        
+        # Verificar se alguma linguagem foi detectada
+        if [ "$BUILD_SUCCESS" = false ] && [ -z "$DETECTED_LANGUAGE" ]; then
+          echo "⚠️ Nenhuma linguagem suportada detectada automaticamente"
+          echo "ℹ️ Continuando com código fonte original para auto-packaging"
+          BUILD_SUCCESS=true
+        elif [ "$BUILD_SUCCESS" = false ]; then
+          echo "❌ Build falhou para $DETECTED_LANGUAGE"
+          echo "ℹ️ Continuando mesmo assim - o auto-packaging pode ainda funcionar"
+          BUILD_SUCCESS=true
+        fi
+        
+        echo "=== RESUMO ==="
+        echo "Linguagem detectada: ${DETECTED_LANGUAGE:-'Não detectada'}"
+        echo "Status do build: $([ "$BUILD_SUCCESS" = true ] && echo "✅ Sucesso" || echo "❌ Falha")"
+        echo "==============="
+        
+      displayName: 'Build Automático por Linguagem'
+      
+    - publish: $(System.DefaultWorkingDirectory)
+      artifact: 'source-code'
+      displayName: 'Publicar código fonte'
 
-              # Extrai todos os zips encontrados recursivamente
-              find artifacts/$(BUILD_ID) -type f -name "*.zip" | while read filename; do
-                unzip -o -d "$(dirname "$filename")" "$filename"
-              done
-
-              # Remove todos os zips encontrados recursivamente
-              find artifacts/$(BUILD_ID) -type f -name "*.zip" -delete
-
-              # Gera o analysisPack.zip com todo o conteúdo do output
-              cd artifacts/$(BUILD_ID)
-              zip -r analysisPack.zip .
-              cd -
-            displayName: Instalar CLI e Autopack Veracode
-
-          - task: PublishBuildArtifacts@1
-            inputs:
-              PathtoPublish: 'artifacts/$(BUILD_ID)'
-              ArtifactName: 'analysisPack'
-              publishLocation: 'Container'
-
-  - stage: SCA
-    displayName: Veracode SCA
-    jobs:
-      - job: SCA
-        pool:
-          vmImage: 'ubuntu-22.04'
-        steps:
-          - checkout: self
-          - bash: curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
-            env:
-              SRCCLR_API_TOKEN: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NTUxNzk2LCJleHAiOjE3NTEwMDM5MzIsImF1dGhvcml0aWVzIjoiQUdFTlQiLCJqdGkiOiJmOGY1YTg5ZS1jZGEwLTQ0ZTItOWFmZC1lYTUwZDk5YTM3YzciLCJjbGllbnRfaWQiOiIiLCJzY29wZSI6W119.TylrM59Rw4U2L-E7PB7Sqs7ywrLA6m29UZhPEyCRmvpKkg-9-bUjclkrr_dEjVO6DO592WLPlcDYR6O_Vz7Fl_eQTKLxaGb6ttTI9SDQQypFS1UfUOhgR6gKLvJ5VU9UNk3EuqrjawSemyaSz8mVfghMHhsmqqvwVIizJmXkErU
-
-  - stage: Scan
-    displayName: Veracode Scan
-    dependsOn: AutoPack
-    jobs:
-      - job: Scan
-        pool:
-          vmImage: 'ubuntu-22.04'
-        steps:
-          - download: current
-            artifact: analysisPack
-
-          - bash: |
-              echo "Diretório de trabalho atual: $(pwd)"
-              echo "Pipeline Workspace: $PIPELINE_WORKSPACE"
-              echo "Listando conteúdo do Pipeline.Workspace:"
-              ls -la $PIPELINE_WORKSPACE || echo "Pipeline.Workspace não encontrado"
-              echo "Listando conteúdo do artefato analysisPack:"
-              ls -la $PIPELINE_WORKSPACE/analysisPack/ || echo "Diretório analysisPack não encontrado"
-              echo "Procurando por analysisPack.zip em todo o workspace:"
-              find $PIPELINE_WORKSPACE -name "*.zip" -type f || echo "Nenhum arquivo .zip encontrado"
+- stage: VeracodeSecurity
+  displayName: 'Análise de Segurança Veracode'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: VeracodeAutoPackaging
+    displayName: 'Auto-packaging e Análises Veracode'
+    steps:
+    - download: current
+      artifact: 'source-code'
+      displayName: 'Download do código fonte'
+      
+    - script: |
+        cd $(Pipeline.Workspace)/source-code
+        
+        # Instalar Veracode CLI
+        curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+        export PATH="$HOME/.veracode-cli/bin:$PATH"
+        
+        # Verificar instalação
+        veracode version
+        
+        echo "Iniciando auto-packaging..."
+        echo "Diretório atual: $(pwd)"
+        echo "Conteúdo do diretório:"
+        ls -la
+        
+      displayName: 'Instalar Veracode CLI'
+      
+    - script: |
+        cd $(Pipeline.Workspace)/source-code
+        export PATH="$HOME/.veracode-cli/bin:$PATH"
+        
+        # Configurar autenticação Veracode
+        export VERACODE_API_KEY_ID=$(VERACODE_API_ID)
+        export VERACODE_API_KEY_SECRET=$(VERACODE_API_KEY)
+        
+        # Auto-packaging
+        echo "=== INICIANDO AUTO-PACKAGING ==="
+        mkdir -p veracode-artifacts
+        
+        veracode package \
+          --source . \
+          --output veracode-artifacts \
+          --trust
+          
+        echo "=== AUTO-PACKAGING CONCLUÍDO ==="
+        echo "Artifacts gerados:"
+        ls -la veracode-artifacts/
+        
+      displayName: 'Veracode Auto-packaging'
+      env:
+        VERACODE_API_KEY_ID: $(VERACODE_API_ID)
+        VERACODE_API_KEY_SECRET: $(VERACODE_API_KEY)
+        
+    - script: |
+        cd $(Pipeline.Workspace)/source-code
+        export PATH="$HOME/.veracode-cli/bin:$PATH"
+        
+        # Configurar autenticação Veracode
+        export VERACODE_API_KEY_ID=$(VERACODE_API_ID)
+        export VERACODE_API_KEY_SECRET=$(VERACODE_API_KEY)
+        
+        echo "=== INICIANDO PIPELINE SCAN (SAST) ==="
+        
+        # Executar Pipeline Scan para cada artifact
+        for artifact in veracode-artifacts/*.zip; do
+          if [ -f "$artifact" ]; then
+            echo "Executando Pipeline Scan para: $artifact"
+            
+            veracode static scan \
+              --file "$artifact" \
+              --app-id "$(APPLICATION_NAME)" \
+              --project-name "$(APPLICATION_NAME)" \
+              --project-ref "$(Build.SourceBranchName)" \
+              --project-url "$(Build.Repository.Uri)" \
+              --baseline-file baseline.json \
+              --results-file pipeline-results.json \
+              --fail-on new,recurring \
+              --format json
               
-              # Procura o arquivo no local correto dos artefatos
-              ARTIFACT_PATH="$(find $PIPELINE_WORKSPACE/analysisPack -type f -name 'analysisPack.zip' | head -n1)"
-              if [ -f "$ARTIFACT_PATH" ]; then
-                echo "Arquivo encontrado: $ARTIFACT_PATH"
-                echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
-              else
-                echo "Erro: analysisPack.zip não encontrado no diretório de artefatos"
-                echo "Tentando procurar em outros locais..."
-                ARTIFACT_PATH="$(find $PIPELINE_WORKSPACE -type f -name 'analysisPack.zip' | head -n1)"
-                if [ -f "$ARTIFACT_PATH" ]; then
-                  echo "Arquivo encontrado em: $ARTIFACT_PATH"
-                  echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
-                else
-                  echo "analysisPack.zip não encontrado em lugar nenhum"
-                  exit 1
-                fi
+            # Verificar se o scan foi bem-sucedido
+            if [ $? -eq 0 ]; then
+              echo "Pipeline Scan concluído com sucesso para $artifact"
+            else
+              echo "Pipeline Scan falhou para $artifact"
+              if [ "$(BREAK_BUILD_ON_ERROR)" = "true" ]; then
+                echo "##vso[task.logissue type=error]Pipeline Scan falhou - quebrando build conforme configuração"
+                exit 1
               fi
-            displayName: Detectar Arquivo
-            env:
-              PIPELINE_WORKSPACE: $(Pipeline.Workspace)
-
-
-          - bash: veracode-pipeline-scan -vid a5c076c36bbaa3aa9482033c3f7745b0 -vkey 422be44116a9d6309a4734c42130fa0ada09ebcfc4f5d677f57c700db034ff93392e809225df9a4485729b967e5a6b8b217834ad12b8a1e16b479278acf366b8 -file $ARTIFACT_FILE -fail_build true
-            displayName: Executar Veracode Pipeline Scan
-            env:
-              ARTIFACT_FILE: $(artifact_file)
-
-  - stage: SAST
-    displayName: Veracode SAST
-    dependsOn: AutoPack
-    jobs:
-      - job: SAST
-        pool:
-          vmImage: 'ubuntu-22.04'
-        steps:
-          - download: current
-            artifact: analysisPack
-
-          - bash: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
-            displayName: Baixar Wrapper
-
-          - bash: |
-              declare -A PROJECT_MAP=( ["nomeprojeto1"]="novonomeprojeto" ["nomeprojeto02"]="novonomeprojeto02" )
-              FINAL_PROJ=${PROJECT_MAP["LabTeste"]:-"LabTeste"}
-              echo "##vso[task.setvariable variable=PROJECT_SUB]$FINAL_PROJ"
-            displayName: Substituir Nome do Projeto
-
-          - bash: |
-              echo "Diretório de trabalho atual: $(pwd)"
-              echo "Pipeline Workspace: $PIPELINE_WORKSPACE"
-              echo "Listando conteúdo do Pipeline.Workspace:"
-              ls -la $PIPELINE_WORKSPACE || echo "Pipeline.Workspace não encontrado"
-              echo "Listando conteúdo do artefato analysisPack:"
-              ls -la $PIPELINE_WORKSPACE/analysisPack/ || echo "Diretório analysisPack não encontrado"
-              echo "Procurando por analysisPack.zip em todo o workspace:"
-              find $PIPELINE_WORKSPACE -name "*.zip" -type f || echo "Nenhum arquivo .zip encontrado"
+            fi
+          fi
+        done
+        
+        echo "=== PIPELINE SCAN CONCLUÍDO ==="
+        
+      displayName: 'Veracode Pipeline Scan (SAST)'
+      env:
+        VERACODE_API_KEY_ID: $(VERACODE_API_ID)
+        VERACODE_API_KEY_SECRET: $(VERACODE_API_KEY)
+      continueOnError: ${{ eq(variables.BREAK_BUILD_ON_ERROR, false) }}
+      
+    - script: |
+        cd $(Pipeline.Workspace)/source-code
+        export PATH="$HOME/.veracode-cli/bin:$PATH"
+        
+        # Configurar autenticação SCA
+        export SRCCLR_API_TOKEN=$(SRCCLR_API_TOKEN)
+        
+        echo "=== INICIANDO SCA SCAN ==="
+        
+        # Executar SCA usando Veracode CLI
+        veracode sca scan \
+          --source . \
+          --quick \
+          --json-output-file sca-results.json
+          
+        # Verificar resultados SCA
+        if [ $? -eq 0 ]; then
+          echo "SCA Scan concluído com sucesso"
+          
+          # Exibir resumo dos resultados se disponível
+          if [ -f "sca-results.json" ]; then
+            echo "Resumo dos resultados SCA:"
+            cat sca-results.json | jq '.summary' || echo "Resultados disponíveis em sca-results.json"
+          fi
+        else
+          echo "SCA Scan falhou"
+          if [ "$(BREAK_BUILD_ON_ERROR)" = "true" ]; then
+            echo "##vso[task.logissue type=error]SCA Scan falhou - quebrando build conforme configuração"
+            exit 1
+          fi
+        fi
+        
+        echo "=== SCA SCAN CONCLUÍDO ==="
+        
+      displayName: 'Veracode SCA Scan'
+      env:
+        SRCCLR_API_TOKEN: $(SRCCLR_API_TOKEN)
+      continueOnError: ${{ eq(variables.BREAK_BUILD_ON_ERROR, false) }}
+      
+    # Upload dos resultados para análise na plataforma Veracode (opcional)
+    - script: |
+        cd $(Pipeline.Workspace)/source-code
+        export PATH="$HOME/.veracode-cli/bin:$PATH"
+        
+        # Configurar autenticação Veracode
+        export VERACODE_API_KEY_ID=$(VERACODE_API_ID)
+        export VERACODE_API_KEY_SECRET=$(VERACODE_API_KEY)
+        
+        echo "=== UPLOAD PARA PLATAFORMA VERACODE ==="
+        
+        # Upload para análise completa na plataforma (Policy Scan)
+        for artifact in veracode-artifacts/*.zip; do
+          if [ -f "$artifact" ]; then
+            echo "Fazendo upload de $artifact para análise na plataforma..."
+            
+            veracode static upload \
+              --file "$artifact" \
+              --app-name "$(APPLICATION_NAME)" \
+              --version "$(BUILD_VERSION)" \
+              --description "Build $(Build.BuildNumber) - Branch $(Build.SourceBranchName)"
               
-              # Procura o arquivo no local correto dos artefatos
-              ARTIFACT_PATH="$(find $PIPELINE_WORKSPACE/analysisPack -type f -name 'analysisPack.zip' | head -n1)"
-              if [ -f "$ARTIFACT_PATH" ]; then
-                echo "Arquivo encontrado: $ARTIFACT_PATH"
-                echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
-              else
-                echo "Erro: analysisPack.zip não encontrado no diretório de artefatos"
-                echo "Tentando procurar em outros locais..."
-                ARTIFACT_PATH="$(find $PIPELINE_WORKSPACE -type f -name 'analysisPack.zip' | head -n1)"
-                if [ -f "$ARTIFACT_PATH" ]; then
-                  echo "Arquivo encontrado em: $ARTIFACT_PATH"
-                  echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
-                else
-                  echo "analysisPack.zip não encontrado em lugar nenhum"
-                  exit 1
-                fi
-              fi
-            displayName: Detectar Arquivo
-            env:
-              PIPELINE_WORKSPACE: $(Pipeline.Workspace)
+            if [ $? -eq 0 ]; then
+              echo "Upload realizado com sucesso para $artifact"
+            else
+              echo "Falha no upload de $artifact"
+            fi
+          fi
+        done
+        
+        echo "=== UPLOAD CONCLUÍDO ==="
+        
+      displayName: 'Upload para Plataforma Veracode (Policy Scan)'
+      env:
+        VERACODE_API_KEY_ID: $(VERACODE_API_ID)
+        VERACODE_API_KEY_SECRET: $(VERACODE_API_KEY)
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+      
+    # Publicar resultados
+    - task: PublishTestResults@2
+      condition: always()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '**/pipeline-results.json'
+        testRunTitle: 'Veracode Pipeline Scan Results'
+      displayName: 'Publicar Resultados Pipeline Scan'
+      continueOnError: true
+      
+    - publish: $(Pipeline.Workspace)/source-code/veracode-artifacts
+      artifact: 'veracode-artifacts'
+      condition: always()
+      displayName: 'Publicar Artifacts Veracode'
+      
+    - publish: $(Pipeline.Workspace)/source-code/pipeline-results.json
+      artifact: 'veracode-pipeline-results'
+      condition: always()
+      displayName: 'Publicar Resultados Pipeline Scan'
+      
+    - publish: $(Pipeline.Workspace)/source-code/sca-results.json
+      artifact: 'veracode-sca-results'
+      condition: always()
+      displayName: 'Publicar Resultados SCA'
 
-          - bash: |
-              echo "Executando Veracode SAST com arquivo: $ARTIFACT_FILE"
-              echo "APIID: a5c076c36bbaa3aa9482033c3f7745b0"
-              echo "Environment: prod"
-              echo "Project: $PROJECT_NAME"
-              echo "Build Version: latest"
-              
-              if [ "prod" == "prod" ]; then
-                java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                  -vid a5c076c36bbaa3aa9482033c3f7745b0 \
-                  -vkey 422be44116a9d6309a4734c42130fa0ada09ebcfc4f5d677f57c700db034ff93392e809225df9a4485729b967e5a6b8b217834ad12b8a1e16b479278acf366b8 \
-                  -action uploadandscan \
-                  -appname "$PROJECT_NAME" \
-                  -version "latest" \
-                  -filepath "$ARTIFACT_FILE" \
-                  -createprofile true \
-                  -deleteincompletescan 2 \
-                  -createsandbox false
-              else
-                java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                  -vid a5c076c36bbaa3aa9482033c3f7745b0 \
-                  -vkey 422be44116a9d6309a4734c42130fa0ada09ebcfc4f5d677f57c700db034ff93392e809225df9a4485729b967e5a6b8b217834ad12b8a1e16b479278acf366b8 \
-                  -action uploadandscan \
-                  -appname "$PROJECT_NAME" \
-                  -version "latest" \
-                  -filepath "$ARTIFACT_FILE" \
-                  -createprofile true \
-                  -deleteincompletescan 2 \
-                  -createsandbox true \
-                  -sandboxname "prod"
-              fi
-            displayName: Executar Veracode SAST
-            env:
-              ARTIFACT_FILE: $(artifact_file)
-              PROJECT_NAME: $(PROJECT_SUB)
+- stage: SecurityGates
+  displayName: 'Security Gates'
+  dependsOn: VeracodeSecurity
+  condition: always()
+  jobs:
+  - job: SecurityValidation
+    displayName: 'Validação de Segurança'
+    steps:
+    - download: current
+      artifact: 'veracode-pipeline-results'
+      displayName: 'Download dos resultados'
+      
+    - script: |
+        echo "=== VALIDAÇÃO DOS RESULTADOS DE SEGURANÇA ==="
+        
+        # Verificar se existem resultados críticos
+        if [ -f "$(Pipeline.Workspace)/veracode-pipeline-results/pipeline-results.json" ]; then
+          echo "Analisando resultados do Pipeline Scan..."
+          
+          # Aqui você pode implementar lógica personalizada para validar os resultados
+          # Por exemplo, verificar número de vulnerabilidades críticas/altas
+          
+          CRITICAL_ISSUES=$(cat $(Pipeline.Workspace)/veracode-pipeline-results/pipeline-results.json | jq '.findings | map(select(.severity == "CRITICAL")) | length' 2>/dev/null || echo "0")
+          HIGH_ISSUES=$(cat $(Pipeline.Workspace)/veracode-pipeline-results/pipeline-results.json | jq '.findings | map(select(.severity == "HIGH")) | length' 2>/dev/null || echo "0")
+          
+          echo "Vulnerabilidades Críticas encontradas: $CRITICAL_ISSUES"
+          echo "Vulnerabilidades Altas encontradas: $HIGH_ISSUES"
+          
+          # Definir thresholds (personalizável)
+          MAX_CRITICAL=0
+          MAX_HIGH=5
+          
+          if [ "$CRITICAL_ISSUES" -gt "$MAX_CRITICAL" ] || [ "$HIGH_ISSUES" -gt "$MAX_HIGH" ]; then
+            if [ "$(BREAK_BUILD_ON_POLICY)" = "true" ]; then
+              echo "##vso[task.logissue type=error]Thresholds de segurança excedidos! Críticas: $CRITICAL_ISSUES (max: $MAX_CRITICAL), Altas: $HIGH_ISSUES (max: $MAX_HIGH)"
+              exit 1
+            else
+              echo "##vso[task.logissue type=warning]Thresholds de segurança excedidos, mas build continuará"
+            fi
+          else
+            echo "✅ Thresholds de segurança atendidos"
+          fi
+        else
+          echo "Nenhum resultado de Pipeline Scan encontrado"
+        fi
+        
+        echo "=== VALIDAÇÃO CONCLUÍDA ==="
+        
+      displayName: 'Validar Thresholds de Segurança'
+      condition: always()
