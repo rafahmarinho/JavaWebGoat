@@ -51,7 +51,7 @@ stages:
           - checkout: self
           - bash: curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
             env:
-              SRCCLR_API_TOKEN: $(SCA)
+              SRCCLR_API_TOKEN: $(SRCCLR_API_TOKEN)
 
   - stage: Scan
     displayName: Veracode Scan
@@ -65,25 +65,36 @@ stages:
             artifact: analysisPack
 
           - bash: |
-              echo "Listando arquivos no diretório atual:"
-              find . -name "*.zip" -type f
-              echo "Procurando por analysisPack.zip..."
-              ARTIFACT_PATH="$(find . -type f -name 'analysisPack.zip' | head -n1)"
+              echo "Diretório de trabalho atual: $(pwd)"
+              echo "Pipeline Workspace: $(Pipeline.Workspace)"
+              echo "Listando conteúdo do Pipeline.Workspace:"
+              ls -la $(Pipeline.Workspace) || echo "Pipeline.Workspace não encontrado"
+              echo "Listando conteúdo do artefato analysisPack:"
+              ls -la $(Pipeline.Workspace)/analysisPack/ || echo "Diretório analysisPack não encontrado"
+              echo "Procurando por analysisPack.zip em todo o workspace:"
+              find $(Pipeline.Workspace) -name "*.zip" -type f || echo "Nenhum arquivo .zip encontrado"
+              
+              # Procura o arquivo no local correto dos artefatos
+              ARTIFACT_PATH="$(find $(Pipeline.Workspace)/analysisPack -type f -name 'analysisPack.zip' | head -n1)"
               if [ -f "$ARTIFACT_PATH" ]; then
                 echo "Arquivo encontrado: $ARTIFACT_PATH"
                 echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
               else
-                echo "Erro: analysisPack.zip não encontrado"
-                echo "Conteúdo do diretório atual:"
-                ls -la
-                echo "Estrutura de diretórios:"
-                find . -type f -name "*.zip"
-                exit 1
+                echo "Erro: analysisPack.zip não encontrado no diretório de artefatos"
+                echo "Tentando procurar em outros locais..."
+                ARTIFACT_PATH="$(find $(Pipeline.Workspace) -type f -name 'analysisPack.zip' | head -n1)"
+                if [ -f "$ARTIFACT_PATH" ]; then
+                  echo "Arquivo encontrado em: $ARTIFACT_PATH"
+                  echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
+                else
+                  echo "analysisPack.zip não encontrado em lugar nenhum"
+                  exit 1
+                fi
               fi
             displayName: Detectar Arquivo
 
 
-          - bash: veracode-pipeline-scan -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) -file $(artifact_file) -fail_build true
+          - bash: veracode-pipeline-scan -vid $(APIID) -vkey $(APIKEY) -file $(artifact_file) -fail_build true
             displayName: Executar Veracode Pipeline Scan
 
   - stage: SAST
@@ -107,26 +118,37 @@ stages:
             displayName: Substituir Nome do Projeto
 
           - bash: |
-              echo "Listando arquivos no diretório atual:"
-              find . -name "*.zip" -type f
-              echo "Procurando por analysisPack.zip..."
-              ARTIFACT_PATH="$(find . -type f -name 'analysisPack.zip' | head -n1)"
+              echo "Diretório de trabalho atual: $(pwd)"
+              echo "Pipeline Workspace: $(Pipeline.Workspace)"
+              echo "Listando conteúdo do Pipeline.Workspace:"
+              ls -la $(Pipeline.Workspace) || echo "Pipeline.Workspace não encontrado"
+              echo "Listando conteúdo do artefato analysisPack:"
+              ls -la $(Pipeline.Workspace)/analysisPack/ || echo "Diretório analysisPack não encontrado"
+              echo "Procurando por analysisPack.zip em todo o workspace:"
+              find $(Pipeline.Workspace) -name "*.zip" -type f || echo "Nenhum arquivo .zip encontrado"
+              
+              # Procura o arquivo no local correto dos artefatos
+              ARTIFACT_PATH="$(find $(Pipeline.Workspace)/analysisPack -type f -name 'analysisPack.zip' | head -n1)"
               if [ -f "$ARTIFACT_PATH" ]; then
                 echo "Arquivo encontrado: $ARTIFACT_PATH"
                 echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
               else
-                echo "Erro: analysisPack.zip não encontrado"
-                echo "Conteúdo do diretório atual:"
-                ls -la
-                echo "Estrutura de diretórios:"
-                find . -type f -name "*.zip"
-                exit 1
+                echo "Erro: analysisPack.zip não encontrado no diretório de artefatos"
+                echo "Tentando procurar em outros locais..."
+                ARTIFACT_PATH="$(find $(Pipeline.Workspace) -type f -name 'analysisPack.zip' | head -n1)"
+                if [ -f "$ARTIFACT_PATH" ]; then
+                  echo "Arquivo encontrado em: $ARTIFACT_PATH"
+                  echo "##vso[task.setvariable variable=artifact_file]$ARTIFACT_PATH"
+                else
+                  echo "analysisPack.zip não encontrado em lugar nenhum"
+                  exit 1
+                fi
               fi
               
               echo "Executando Veracode SAST com arquivo: $(artifact_file)"
               if [ "$(ENVIRONMENT_PARAM)" == "prod" ]; then
                 java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                  -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) \
+                  -vid $(APIID) -vkey $(APIKEY) \
                   -action uploadandscan \
                   -appname "$(PROJECT_SUB)" \
                   -version "$(BUILD_ID)" \
@@ -136,7 +158,7 @@ stages:
                   -createsandbox false
               else
                 java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                  -vid $(APIID_VERACODE) -vkey $(APIKEY_VERACODE) \
+                  -vid $(APIID) -vkey $(APIKEY) \
                   -action uploadandscan \
                   -appname "$(PROJECT_SUB)" \
                   -version "$(BUILD_ID)" \
