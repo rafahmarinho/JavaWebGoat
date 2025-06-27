@@ -17,6 +17,26 @@ steps:
 - task: CmdLine@2
   inputs:
     script: |
+      wget https://download.oracle.com/java/23/latest/jdk-23_linux-x64_bin.tar.gz -O /tmp/jdk23.tar.gz
+      mkdir /tmp/jdk23
+      tar -xzf /tmp/jdk23.tar.gz -C /tmp/jdk23 --strip-components=1
+      echo "##vso[task.setvariable variable=JAVA_HOME]/tmp/jdk23"
+      echo "##vso[task.setvariable variable=PATH]/tmp/jdk23/bin:$(PATH)"
+      export JAVA_HOME=/tmp/jdk23
+      export PATH=/tmp/jdk23/bin:$PATH
+      java -version
+  displayName: 'Install Java 23'
+
+- script: |
+      mvn clean install
+  displayName: 'Build with Maven (Java 23)'
+  env:
+    JAVA_HOME: /tmp/jdk23
+    PATH: /tmp/jdk23/bin:$(PATH)
+
+- task: CmdLine@2
+  inputs:
+    script: |
       curl -fsS https://tools.veracode.com/veracode-cli/install | sh
       export PATH="/home/vsts/work/1/s/:$PATH"
       veracode package --source . --output $(srcPack) --trust
