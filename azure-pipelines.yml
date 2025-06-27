@@ -1,106 +1,78 @@
 trigger:
-- main
+- master
+
 pool:
   vmImage: ubuntu-latest
-variables:
-  - group: Veracode Api Key  # Nome do grupo de variáveis configurado na Library
-  
-stages:
-- stage: BuildAndScan
-  jobs:
-  - job: BuildAndScanJob
-    steps:
-    # Baixa e instala a CLI do Veracode
-    - script: |
-        set -e
-        set -x
-        curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-        ./veracode package --source . --type directory --output $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) --trust --verbose
-        ls -lhaR $(Build.ArtifactStagingDirectory)/artifacts/
-        echo "Renomeando o arquivo ZIP gerado..."
-        find $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) -name "*.zip"
-        mv $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/*.zip $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip
-        ls -lhaR $(Build.ArtifactStagingDirectory)/artifacts/
-      env:
-        VERACODE_API_KEY_ID: $(APIID)
-        VERACODE_API_KEY_SECRET: $(APIKEY)
-        displayName: CLI e package
-    # Publica o pacote de análise como um artefato
-    - task: PublishBuildArtifacts@1
-      inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip'
-        ArtifactName: 'analysisPack'
-        publishLocation: 'Container'
-      displayName: 'Publish Analysis Package Artifact'
-  - job: SCA
-    displayName: 'Execute SCA Scan'
-    dependsOn: BuildAndScanJob
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-      # Executa o Veracode SCA Scan
-      - script: |
-          curl -sSL https://download.sourceclear.com/ci.sh | sh -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
-        displayName: 'Veracode SCA Scan'
-        env:
-          SRCCLR_API_TOKEN: $(SRCCLR_API_TOKEN)
-  - job: sast
-    displayName: 'Execute SAST'
-    dependsOn: BuildAndScanJob
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-      # Baixa o artefato do pacote para a análise
-      - task: DownloadPipelineArtifact@2
-        inputs:
-          artifactName: 'analysisPack'
-          targetPath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)'
-      - script: |
-          curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
-        displayName: 'Download API Wrappers'
-  - job: Wrapper
-    displayName: 'Veracode U&S'
-    steps:
-    - task: DownloadBuildArtifacts@1
-      inputs:
-        buildType: 'current'
-        downloadType: 'single'
-        artifactName: 'analysisPack'
-        downloadPath: '$(System.ArtifactsDirectory)'
-      displayName: 'Carregando arquivos'
-    - task: Veracode@3
-      inputs:
-        ConnectionDetailsSelection: 'Credentials'
-        apiId: '$(APIID)'
-        apiKey: '$(APIKEY)'
-        veracodeAppProfile: 'node.js'
-        version: '$(build.buildNumber)'
-        filepath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip'
-        createSandBox: false
-        createProfile: true
-        importResults: false
-        failBuildOnPolicyFail: false
-      displayName: 'Veracode U&S'
 
-  - job: pipeline_scan
-    displayName: 'Exe Pipeline Scan'
-    dependsOn: BuildAndScanJob
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-      # Baixa o artefato
-      - task: DownloadPipelineArtifact@2
-        inputs:
-          artifactName: 'analysisPack'
-          targetPath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)'
-      # Baixa o Veracode e executa
-      - script: |
-          curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
-          unzip pipeline-scan-LATEST.zip -d $(Build.ArtifactStagingDirectory)/scanner
-        displayName: 'Download and Unzip Pipeline Scanner'
-      - script: |
-          java -jar $(Build.ArtifactStagingDirectory)/scanner/pipeline-scan.jar -vid $(VERACODE_API_ID) -vkey $(VERACODE_API_KEY) --file '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip' --issue_details true
-          ls -la $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)
-          chmod 644 $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip
-        continueOnError: true
-        displayName: 'Visualização de vulnerabilidades Pipeline Scan'
+variables:
+  - group: 'Veracode Api Key'
+  - name: veracodeAppProfile
+    value: '$(Build.DefinitionName)'
+  - name: srcPack
+    value: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId)'
+  - name: analisysPack
+    value: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId)/analisysPack.zip'
+steps:
+# - task: CmdLine@2
+#   inputs:
+#     script: 'npm install'
+#   displayName: 'NPM'
+
+- task: CmdLine@2
+  inputs:
+    script: |
+      curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+      export PATH="/home/vsts/work/1/s/:$PATH"
+      veracode package --source . --output $(srcPack) --trust
+      mv $(srcPack)/*.zip $(srcPack)/analisysPack.zip
+  displayName: 'Veracode Auto-Package'
+
+- task: CmdLine@2
+  inputs:
+    script: |
+      export SRCCLR_API_TOKEN=$(SRCCLR_API_TOKEN)
+      curl -sSL https://download.sourceclear.com/ci.sh | bash -s – scan --update-advisor --allow-dirty
+  displayName: 'Veracode SCA'
+  continueOnError: true
+
+- script: |
+    curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+  displayName: 'Download Pipeline Scanner'
+
+- task: ExtractFiles@1
+  inputs:
+    archiveFilePatterns: 'pipeline-scan-LATEST.zip'
+    destinationFolder: '$(Build.ArtifactStagingDirectory)'
+    cleanDestinationFolder: false
+- script: |
+      java -jar $(Build.ArtifactStagingDirectory)/pipeline-scan.jar -vid $(APIID) -vkey $(APIKEY) --file '$(analisysPack)' --issue_details true 
+  displayName: 'Veracode PipelineScan'
+  continueOnError: true
+
+- task: Veracode@3
+  inputs:
+    ConnectionDetailsSelection: 'Credentials'
+    apiId: '$(APIID)'
+    apiKey: '$(APIKEY)'
+    veracodeAppProfile: '$(veracodeAppProfile)'
+    version: '$(build.buildNumber)'
+    filepath: '$(analisysPack)'
+    createSandBox: false
+    createProfile: true
+    importResults: false
+    failBuildOnPolicyFail: false
+  displayName: 'Veracode SAST'
+
+# - task: Veracode Flaw Importer@3
+#   inputs:
+#     ConnectionDetailsSelection: 'Credentials'
+#     apiId: '$(APIID)'
+#     apiKey: '$(APIKEY)'
+#     veracodeAppProfile: '$(veracodeAppProfile)'
+#     sandboxName: 
+#     importType: 'All Flaws'
+#     workItemType: 'Issue'
+#     area: '$(system.teamProject)'
+#     addCustomTag: '$(build.buildNumber)'
+#     flawImportLimit: '1000'
+#   displayName: 'Veracode importando falhas'
