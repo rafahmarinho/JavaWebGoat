@@ -14,12 +14,7 @@ variables:
     value: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId)/analisysPack.zip'
 
 steps:
-- task: CmdLine@2
-  inputs:
-    script: 'npm install'
-  displayName: 'NPM'
-
-# Detecta se é Java (se existir pom.xml ou build.gradle)
+# Detecta se é projeto Java (pom.xml ou build.gradle)
 - bash: |
     if [ -f "pom.xml" ] || [ -f "build.gradle" ]; then
       echo "##vso[task.setvariable variable=IS_JAVA]true"
@@ -28,44 +23,44 @@ steps:
     fi
   displayName: 'Detectar Projeto Java'
 
-# Se for Java, compila e empacota .jar/.war. Senão, empacota com a Veracode CLI normalmente.
+# Compilação/empacotamento universal
 - bash: |
     mkdir -p $(srcPack)
+
     if [ "$(IS_JAVA)" = "true" ]; then
-      # Detecta versão do Java
+      # Detecta Java (padrão 17 se não encontrar)
       JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml 2>/dev/null || echo "17")
       if [[ "$JAVA_VERSION" != "11" && "$JAVA_VERSION" != "17" && "$JAVA_VERSION" != "21" ]]; then
         JAVA_VERSION="17"
       fi
-      echo "Usando JAVA_VERSION=$JAVA_VERSION"
-      # Instala Java necessário (somente se build for Maven)
-      sudo update-alternatives --set java /usr/lib/jvm/java-${JAVA_VERSION}-openjdk-amd64/bin/java || true
-      sudo update-alternatives --set javac /usr/lib/jvm/java-${JAVA_VERSION}-openjdk-amd64/bin/javac || true
-      # Compila Maven ou Gradle
+
+      # Instala JDK se for Maven (com suporte a Maven 11, 17, 21)
+      echo "Instalando Java $JAVA_VERSION..."
+      sudo apt-get update -qq
+      sudo apt-get install -y openjdk-${JAVA_VERSION}-jdk
+
+      export JAVA_HOME=/usr/lib/jvm/java-${JAVA_VERSION}-openjdk-amd64
+      export PATH=$JAVA_HOME/bin:$PATH
+      echo "JAVA_HOME: $JAVA_HOME"
+      java -version
+
+      # Compila Maven/Gradle
       if [ -f "pom.xml" ]; then
         mvn clean package -DskipTests
       elif [ -f "build.gradle" ]; then
         ./gradlew build -x test
       fi
+
       ARTIFACT=$(find target/ build/libs/ -maxdepth 1 -type f \( -name "*.jar" -o -name "*.war" \) | head -n 1)
       if [ -n "$ARTIFACT" ]; then
         cp "$ARTIFACT" "$(analisysPack)"
-        echo "Empacotado $ARTIFACT em $(analisysPack)"
+        echo "Empacotado $ARTIFACT para $(analisysPack)"
       else
-        echo "Nenhum .jar ou .war encontrado! Tentando empacotar com Veracode CLI."
-        curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-        ./veracode package --source . --output $(srcPack) --trust
-        ZIPFILE=$(find $(srcPack) -type f -name "*.zip" | head -n 1)
-        if [ -n "$ZIPFILE" ]; then
-          cp "$ZIPFILE" "$(analisysPack)"
-          echo "Pacote $ZIPFILE copiado para $(analisysPack)"
-        else
-          echo "Nenhum arquivo ZIP encontrado. Falha no empacotamento!"
-          exit 1
-        fi
+        echo "Nenhum .jar/.war encontrado. Falha no build."
+        exit 1
       fi
     else
-      # Não é Java: usa a Veracode CLI normalmente
+      # Para outras stacks: empacota com Veracode CLI
       curl -fsS https://tools.veracode.com/veracode-cli/install | sh
       ./veracode package --source . --output $(srcPack) --trust
       ZIPFILE=$(find $(srcPack) -type f -name "*.zip" | head -n 1)
@@ -77,14 +72,14 @@ steps:
         exit 1
       fi
     fi
-  displayName: 'Build e Empacotamento Inteligente (Java/Outros)'
+  displayName: 'Build & Empacotamento Multi-stack'
 
 - task: CmdLine@2
+  displayName: 'Veracode SCA'
   inputs:
     script: |
       export SRCCLR_API_TOKEN=$(SRCCLR_API_TOKEN)
       curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
-  displayName: 'Veracode SCA'
   continueOnError: true
 
 - script: |
@@ -92,6 +87,7 @@ steps:
   displayName: 'Download Pipeline Scanner'
 
 - task: ExtractFiles@1
+  displayName: 'Extrair Pipeline Scanner'
   inputs:
     archiveFilePatterns: 'pipeline-scan-LATEST.zip'
     destinationFolder: '$(Build.ArtifactStagingDirectory)'
@@ -103,6 +99,7 @@ steps:
   continueOnError: true
 
 - task: Veracode@3
+  displayName: 'Veracode SAST'
   inputs:
     ConnectionDetailsSelection: 'Credentials'
     apiId: '$(APIID)'
@@ -114,9 +111,9 @@ steps:
     createProfile: true
     importResults: false
     failBuildOnPolicyFail: false
-  displayName: 'Veracode SAST'
 
 # - task: Veracode Flaw Importer@3
+#   displayName: 'Veracode importando falhas'
 #   inputs:
 #     ConnectionDetailsSelection: 'Credentials'
 #     apiId: '$(APIID)'
@@ -128,4 +125,3 @@ steps:
 #     area: '$(system.teamProject)'
 #     addCustomTag: '$(build.buildNumber)'
 #     flawImportLimit: '1000'
-#   displayName: 'Veracode importando falhas'
