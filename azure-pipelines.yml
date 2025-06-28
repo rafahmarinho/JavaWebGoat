@@ -37,7 +37,7 @@ steps:
   - task: JavaToolInstaller@0
     displayName: Instalar Java Necessário
     inputs:
-      versionSpec: '23' # ou use '23' se quiser forçar
+      versionSpec: '21' # ou use '23' se quiser forçar
       jdkArchitectureOption: 'x64'
       jdkSourceOption: 'AzureStorage'
     condition: eq(variables['JAVA_MAVEN'], 'true')
