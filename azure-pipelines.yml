@@ -23,23 +23,28 @@ steps:
       fi
     displayName: Detectar Projeto Java-Maven
 
-  # Detecta versão do Java do projeto
+  # Detecta versão do Java do projeto, padrão 17 se não achar
   - bash: |
-      JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
+      JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "17")
       if [[ "$JAVA_VERSION" == "11" ]]; then
         JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
       fi
+      # Se não for uma das versões suportadas pelo agente, define 17
+      if [[ "$JAVA_VERSION" != "11" && "$JAVA_VERSION" != "17" && "$JAVA_VERSION" != "21" ]]; then
+        JAVA_VERSION="17"
+      fi
+      echo "Usando JAVA_VERSION=$JAVA_VERSION"
       echo "##vso[task.setvariable variable=JAVA_VERSION]$JAVA_VERSION"
     displayName: Detectar versão do Java
     condition: eq(variables['JAVA_MAVEN'], 'true')
 
-  # Instala Java dinamicamente conforme detectado (ou Java 23 fixo, se quiser)
+  # Instala Java Necessário via agente (PreInstalled: 11, 17, 21)
   - task: JavaToolInstaller@0
     displayName: Instalar Java Necessário
     inputs:
-      versionSpec: '21' # ou use '23' se quiser forçar
+      versionSpec: '$(JAVA_VERSION)'
       jdkArchitectureOption: 'x64'
-      jdkSourceOption: 'AzureStorage'
+      jdkSourceOption: 'PreInstalled'
     condition: eq(variables['JAVA_MAVEN'], 'true')
 
   # Compila o projeto Maven com o Java instalado
@@ -50,19 +55,10 @@ steps:
       mvn clean package
     displayName: Compilar Projeto Maven
     condition: eq(variables['JAVA_MAVEN'], 'true')
+    env:
+      JAVA_HOME: $(JAVA_HOME)
 
-  - task: JavaToolInstaller@0
-    displayName: Instalar Java Necessário
-    inputs:
-      versionSpec: '$(JAVA_VERSION)'
-      jdkArchitectureOption: 'x64'
-      jdkSourceOption: 'PreInstalled'
-    condition: eq(variables['JAVA_MAVEN'], 'true')
-
-  - bash: mvn clean package
-    displayName: Compilar Projeto Maven
-    condition: eq(variables['JAVA_MAVEN'], 'true')
-
+  # Empacota artefato para Veracode ou usa CLI se não for WAR/JAR
   - bash: |
       mkdir -p $(srcPack)
       WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
