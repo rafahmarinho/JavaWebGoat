@@ -1,0 +1,162 @@
+trigger:
+  - master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: 'Veracode Api Key'
+  - name: veracodeAppProfile
+    value: '$(Build.DefinitionName)'
+
+jobs:
+- job: BuildAndPackage
+  displayName: 'Compilar e Empacotar'
+  steps:
+    - bash: |
+        if [ -f "pom.xml" ] || [ -f "build.gradle" ]; then
+          echo "##vso[task.setvariable variable=IS_JAVA]true"
+        else
+          echo "##vso[task.setvariable variable=IS_JAVA]false"
+        fi
+      displayName: 'Detectar Projeto Java'
+
+    - bash: |
+        mkdir -p $(Build.ArtifactStagingDirectory)/veracode-artifact
+
+        if [ "$(IS_JAVA)" = "true" ]; then
+          JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml 2>/dev/null || echo "17")
+          if [[ "$JAVA_VERSION" != "11" && "$JAVA_VERSION" != "17" && "$JAVA_VERSION" != "21" ]]; then
+            JAVA_VERSION="17"
+          fi
+
+          echo "Instalando Java $JAVA_VERSION..."
+          sudo apt-get update -qq
+          sudo apt-get install -y openjdk-${JAVA_VERSION}-jdk
+          export JAVA_HOME=/usr/lib/jvm/java-${JAVA_VERSION}-openjdk-amd64
+          export PATH=$JAVA_HOME/bin:$PATH
+          java -version
+
+          mvn clean package -DskipTests
+        fi
+
+        WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
+        JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
+
+        if [ -f "$WAR_FILE" ]; then
+          echo "WAR encontrado: $WAR_FILE"
+          cp "$WAR_FILE" "$(Build.ArtifactStagingDirectory)/veracode-artifact/analysisPack.war"
+        elif [ -f "$JAR_FILE" ]; then
+          echo "JAR encontrado: $JAR_FILE"
+          cp "$JAR_FILE" "$(Build.ArtifactStagingDirectory)/veracode-artifact/analysisPack.jar"
+        else
+          echo "Nenhum WAR/JAR encontrado. Rodando Autopack..."
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+          ./veracode package --source . --output $(Build.ArtifactStagingDirectory)/veracode-artifact --trust
+
+          mkdir -p $(Build.ArtifactStagingDirectory)/veracode-artifact/unzipped
+          find $(Build.ArtifactStagingDirectory)/veracode-artifact -name "*.zip" | while read filename; do
+            unzip -o "$filename" -d $(Build.ArtifactStagingDirectory)/veracode-artifact/unzipped
+          done
+
+          cd $(Build.ArtifactStagingDirectory)/veracode-artifact/unzipped
+          zip -r ../analysisPack.zip .
+
+          # Remove todos os .zip exceto o analysisPack.zip
+          find $(Build.ArtifactStagingDirectory)/veracode-artifact -name "*.zip" ! -name "analysisPack.zip" -delete
+        fi
+      displayName: 'Empacotar e Reempacotar Artefato'
+
+    - script: |
+        echo "Arquivos gerados após o empacotamento:"
+        echo "--------------------------------------"
+        find $(Build.ArtifactStagingDirectory)/veracode-artifact -type f
+        echo "--------------------------------------"
+        ls -lh $(Build.ArtifactStagingDirectory)/veracode-artifact
+      displayName: 'Mostrar artefatos gerados'
+
+    - script: |
+        cd $(Build.ArtifactStagingDirectory)/veracode-artifact
+        zip -r ../analysisPack.zip .
+        echo "Arquivo zip final:"
+        ls -lh ../analysisPack.zip
+      displayName: 'Compactar tudo em analysisPack.zip'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publicar artefato analysisPack.zip'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/analysisPack.zip'
+        ArtifactName: 'veracode-artifact'
+        publishLocation: 'Container'
+
+- job: VeracodeScan
+  displayName: 'Executar Scans Veracode'
+  dependsOn: BuildAndPackage
+  steps:
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Baixar Artefato'
+      inputs:
+        artifactName: 'veracode-artifact'
+
+    - task: CmdLine@2
+      displayName: 'Veracode SCA'
+      inputs:
+        script: |
+          export SRCCLR_API_TOKEN=$(SRCCLR_API_TOKEN)
+          curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
+      continueOnError: true
+
+    - script: |
+        curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+      displayName: 'Download Pipeline Scanner'
+
+    - task: ExtractFiles@1
+      displayName: 'Extrair Pipeline Scanner'
+      inputs:
+        archiveFilePatterns: 'pipeline-scan-LATEST.zip'
+        destinationFolder: '$(Build.ArtifactStagingDirectory)'
+        cleanDestinationFolder: false
+
+    - script: |
+        echo "Procurando arquivo para scan..."
+        FILE=$(find "$(System.ArtifactsDirectory)/veracode-artifact" -name "analysisPack.zip" | head -n 1)
+
+        if [ -z "$FILE" ]; then
+          echo "Nenhum arquivo encontrado. Abortando."
+          exit 1
+        fi
+
+        echo "Arquivo encontrado para scan: $FILE"
+        echo "Detalhes do arquivo:"
+        ls -lh "$FILE"
+
+        export VID=$(APIID)
+        export VKEY=$(APIKEY)
+
+        java -jar $(Build.ArtifactStagingDirectory)/pipeline-scan.jar \
+          -vid "$VID" -vkey "$VKEY" --file "$FILE" --issue_details true
+      displayName: 'Executar Veracode Pipeline Scan com debug'
+      continueOnError: true
+
+    - script: |
+        FILE=$(find "$(System.ArtifactsDirectory)/veracode-artifact" -name "analysisPack.zip" | head -n 1)
+        if [ -z "$FILE" ]; then
+          echo "Nenhum artefato encontrado para o SAST. Abortando."
+          exit 1
+        fi
+        echo "##vso[task.setvariable variable=DETECTED_ARTIFACT_PATH]$FILE"
+      displayName: 'Detectar artefato para SAST'
+
+    - task: Veracode@3
+      displayName: 'Veracode SAST'
+      inputs:
+        ConnectionDetailsSelection: 'Credentials'
+        apiId: '$(APIID)'
+        apiKey: '$(APIKEY)'
+        veracodeAppProfile: '$(veracodeAppProfile)'
+        version: '$(Build.BuildNumber)'
+        filepath: '$(DETECTED_ARTIFACT_PATH)'
+        createSandBox: false
+        createProfile: true
+        importResults: false
+        failBuildOnPolicyFail: false
